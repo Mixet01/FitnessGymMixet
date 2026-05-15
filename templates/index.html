@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ pwa_app_name }}</title>
+  <meta name="theme-color" content="{{ pwa_theme_color }}">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="{{ pwa_short_name }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="{{ url_for('manifest_webmanifest') }}">
+  <link rel="icon" href="/pwa-icon.svg">
+  <link rel="apple-touch-icon" href="/pwa-icon.svg">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body
+  data-today="{{ today_date }}"
+  data-month="{{ current_month }}"
+  data-google-client-id="{{ google_client_id }}"
+  data-pwa-app-name="{{ pwa_app_name }}"
+>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <section id="auth-gate" class="gate">
+    <article class="hero-panel">
+      <p class="eyebrow">PWA personale</p>
+      <h1>Controlla ogni euro con una vista chiara, installabile e tutta tua.</h1>
+      <p class="lead">Spese Mixet unisce accesso Google, database Supabase, categorie personalizzate e una dashboard pensata per telefono.</p>
+      <div class="hero-pills">
+        <span>Spese ed entrate</span>
+        <span>Categorie custom</span>
+        <span>Trend mensili</span>
+      </div>
+    </article>
+
+    <article class="login-panel">
+      <p class="eyebrow">Accesso</p>
+      <h2>Entra nella tua area</h2>
+      {% if google_client_id %}
+      <p class="helper">Accedi con Google per sincronizzare i tuoi dati tra dispositivi.</p>
+      <div id="google-signin"></div>
+      {% else %}
+      <p class="helper">Google non configurato. Usa l'accesso di sviluppo.</p>
+      <div class="field-row">
+        <input id="dev-name" type="text" placeholder="Nome">
+      </div>
+      <div class="field-row">
+        <input id="dev-email" type="email" placeholder="email@dominio.it">
+      </div>
+      <button id="dev-login" class="btn primary wide">Accedi</button>
+      {% endif %}
+    </article>
+  </section>
+
+  <div id="app-shell" class="hidden app-shell">
+    <input id="month-input" type="month" class="hidden-field">
+
+    <header class="topbar">
+      <div class="top-copy">
+        <p class="eyebrow">Spese Mixet</p>
+        <h1 id="welcome-name">Ciao</h1>
+        <p id="month-caption" class="helper">Panoramica del mese</p>
+      </div>
+      <div class="top-controls">
+        <div class="month-nav">
+          <button id="month-prev" class="icon-btn" aria-label="Mese precedente">&#8249;</button>
+          <div id="month-label" class="month-label">Mese</div>
+          <button id="month-next" class="icon-btn" aria-label="Mese successivo">&#8250;</button>
+        </div>
+        <button id="header-add-entry" class="btn accent">Nuovo movimento</button>
+      </div>
+    </header>
+
+    <main class="app-frame">
+      <section id="screen-dashboard" class="screen active">
+        <div class="hero-grid">
+          <article class="hero-card balance">
+            <span class="mini-label">Saldo del mese</span>
+            <strong id="metric-balance">EUR 0,00</strong>
+            <p id="metric-balance-note" class="helper">Entrate meno uscite</p>
+          </article>
+          <article class="mini-card">
+            <span class="mini-label">Spese</span>
+            <strong id="metric-expense">EUR 0,00</strong>
+          </article>
+          <article class="mini-card">
+            <span class="mini-label">Entrate</span>
+            <strong id="metric-income">EUR 0,00</strong>
+          </article>
+          <article class="mini-card">
+            <span class="mini-label">Movimenti</span>
+            <strong id="metric-count">0</strong>
+          </article>
+        </div>
+
+        <div class="panel-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Categoria top</h3>
+              <span id="top-category-tag" class="soft-chip">Nessuna</span>
+            </div>
+            <div id="category-bars" class="bars"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Andamento settimanale</h3>
+              <span class="soft-chip">mese attivo</span>
+            </div>
+            <div id="week-bars" class="week-bars"></div>
+          </article>
+        </div>
+
+        <div class="panel-grid secondary-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Ultimi 6 mesi</h3>
+              <span id="storage-badge" class="soft-chip">database</span>
+            </div>
+            <div id="trend-bars" class="trend-bars"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <h3>Ultimi movimenti</h3>
+              <button id="open-movements" class="text-btn">vedi tutto</button>
+            </div>
+            <div id="recent-list" class="stack-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="screen-movements" class="screen">
+        <div class="panel">
+          <div class="panel-head blocky">
+            <div>
+              <h3>Movimenti del mese</h3>
+              <p class="helper">Filtra, cerca e modifica ogni movimento.</p>
+            </div>
+            <button id="movements-add-entry" class="btn primary">Aggiungi</button>
+          </div>
+          <div class="filter-row">
+            <div class="chips">
+              <button class="chip active" data-filter-type="all">Tutti</button>
+              <button class="chip" data-filter-type="expense">Spese</button>
+              <button class="chip" data-filter-type="income">Entrate</button>
+            </div>
+            <input id="search-input" type="search" placeholder="Cerca titolo o note">
+          </div>
+          <div id="movement-list" class="stack-list"></div>
+        </div>
+      </section>
+
+      <section id="screen-categories" class="screen">
+        <div class="panel">
+          <div class="panel-head blocky">
+            <div>
+              <h3>Le tue categorie</h3>
+              <p class="helper">Crea, modifica o archivia le categorie senza perdere lo storico.</p>
+            </div>
+            <button id="add-category" class="btn primary">Nuova categoria</button>
+          </div>
+          <div id="category-grid" class="category-grid"></div>
+        </div>
+      </section>
+
+      <section id="screen-profile" class="screen">
+        <div class="panel profile-panel">
+          <div class="panel-head blocky">
+            <div>
+              <h3 id="profile-name">Profilo</h3>
+              <p id="profile-email" class="helper">email</p>
+            </div>
+            <div id="profile-avatar" class="avatar-shell">SM</div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="profile-stat">
+              <span class="mini-label">Spesa media</span>
+              <strong id="profile-average">EUR 0,00</strong>
+            </div>
+            <div class="profile-stat">
+              <span class="mini-label">Spesa giornaliera</span>
+              <strong id="profile-daily">EUR 0,00</strong>
+            </div>
+            <div class="profile-stat">
+              <span class="mini-label">Giorni attivi</span>
+              <strong id="profile-days">0</strong>
+            </div>
+            <div class="profile-stat">
+              <span class="mini-label">Risparmio</span>
+              <strong id="profile-saving-rate">-</strong>
+            </div>
+          </div>
+
+          <div class="profile-actions">
+            <button id="export-csv" class="btn secondary">Esporta CSV</button>
+            <button id="logout-btn" class="btn danger">Esci</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <button id="fab-entry" class="fab" aria-label="Nuovo movimento">+</button>
+
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-screen="screen-dashboard">Dashboard</button>
+      <button class="nav-btn" data-screen="screen-movements">Movimenti</button>
+      <button class="nav-btn" data-screen="screen-categories">Categorie</button>
+      <button class="nav-btn" data-screen="screen-profile">Profilo</button>
+    </nav>
+  </div>
+
+  <div id="entry-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="panel-head blocky">
+        <div>
+          <p class="eyebrow">Movimento</p>
+          <h3 id="entry-modal-title">Nuovo movimento</h3>
+        </div>
+        <button id="close-entry-modal" class="icon-close" aria-label="Chiudi">x</button>
+      </div>
+      <div class="field-grid">
+        <label>
+          <span>Tipo</span>
+          <select id="entry-type">
+            <option value="expense">Spesa</option>
+            <option value="income">Entrata</option>
+          </select>
+        </label>
+        <label>
+          <span>Data</span>
+          <input id="entry-date" type="date">
+        </label>
+      </div>
+      <div class="field-grid">
+        <label>
+          <span>Titolo</span>
+          <input id="entry-title" type="text" placeholder="Es. Spesa settimanale">
+        </label>
+        <label>
+          <span>Importo</span>
+          <input id="entry-amount" type="number" step="0.01" min="0.01" placeholder="0.00">
+        </label>
+      </div>
+      <label>
+        <span>Categoria</span>
+        <select id="entry-category"></select>
+      </label>
+      <label>
+        <span>Note</span>
+        <textarea id="entry-notes" rows="4" placeholder="Dettagli utili o promemoria"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button id="save-entry" class="btn primary">Salva</button>
+        <button id="delete-entry" class="btn danger hidden">Elimina</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="category-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="panel-head blocky">
+        <div>
+          <p class="eyebrow">Categoria</p>
+          <h3 id="category-modal-title">Nuova categoria</h3>
+        </div>
+        <button id="close-category-modal" class="icon-close" aria-label="Chiudi">x</button>
+      </div>
+      <div class="field-grid">
+        <label>
+          <span>Nome</span>
+          <input id="category-name" type="text" placeholder="Es. Bollette">
+        </label>
+        <label>
+          <span>Colore</span>
+          <input id="category-color" type="color" value="#1f7a6f">
+        </label>
+      </div>
+      <label class="toggle-line">
+        <input id="category-archived" type="checkbox">
+        <span>Categoria archiviata</span>
+      </label>
+      <div class="modal-actions">
+        <button id="save-category" class="btn primary">Salva</button>
+        <button id="delete-category" class="btn danger hidden">Archivia o elimina</button>
+      </div>
+    </div>
+  </div>
+
+  {% if google_client_id %}
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  {% endif %}
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
