@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import mimetypes
 import os
 import re
 from datetime import date, datetime, timedelta
@@ -30,11 +31,12 @@ APP_NAME = os.environ.get("PWA_APP_NAME", "Spese Mixet").strip() or "Spese Mixet
 SHORT_NAME = os.environ.get("PWA_SHORT_NAME", "Mixet").strip() or "Mixet"
 THEME_COLOR = os.environ.get("PWA_THEME_COLOR", "#1f7a6f").strip() or "#1f7a6f"
 BG_COLOR = os.environ.get("PWA_BG_COLOR", "#f7f1e8").strip() or "#f7f1e8"
+PWA_ICON_FILE = os.environ.get("PWA_ICON_FILE", "").strip()
 ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "SM").strip() or "SM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
 SESSION_DAYS = int(os.environ.get("SPESE_MIXET_SESSION_DAYS", "90"))
-ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-18-v2").strip() or "2026-05-18-v2"
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-18-v4").strip() or "2026-05-18-v4"
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -86,6 +88,60 @@ def versioned_asset(path):
         return ""
     sep = "&" if "?" in clean_path else "?"
     return f"{clean_path}{sep}v={ASSET_VERSION}"
+
+
+def get_pwa_icon_descriptor():
+    candidates = []
+    if PWA_ICON_FILE:
+        candidates.append(PWA_ICON_FILE)
+    candidates.extend(
+        [
+            "pwa-icon.png",
+            "pwa-icon-512.png",
+            "pwa-icon.jpg",
+            "pwa-icon.jpeg",
+            "pwa-icon.svg",
+            "icon.png",
+            "icon.jpg",
+            "icon.jpeg",
+            "icon.svg",
+        ]
+    )
+
+    for candidate in candidates:
+        safe_name = os.path.basename(candidate)
+        full_path = os.path.join(app.static_folder, safe_name)
+        if os.path.exists(full_path):
+            mime = mimetypes.guess_type(full_path)[0] or "image/png"
+            sizes = "any" if safe_name.lower().endswith(".svg") else "512x512"
+            return {
+                "href": f"/static/{safe_name}",
+                "src": f"/static/{safe_name}",
+                "full_path": full_path,
+                "type": mime,
+                "sizes": sizes,
+                "purpose": "any maskable",
+                "is_custom": True,
+                "filename": safe_name,
+            }
+
+    return {
+        "href": "/pwa-icon.svg",
+        "src": "/pwa-icon.svg",
+        "full_path": "",
+        "type": "image/svg+xml",
+        "sizes": "any",
+        "purpose": "any maskable",
+        "is_custom": False,
+        "filename": "pwa-icon.svg",
+    }
+
+
+def pwa_icon_cache_tag(icon):
+    full_path = icon.get("full_path") or ""
+    if full_path and os.path.exists(full_path):
+        return str(int(os.path.getmtime(full_path)))
+    return ASSET_VERSION
 
 
 def sanitize_color(value, fallback="#1f7a6f"):
@@ -167,6 +223,47 @@ def month_label(month_value):
         "Dicembre",
     ]
     return f"{labels[int(month) - 1]} {year}"
+
+
+def month_day_count(month_start):
+    return (shift_month(month_start, 1) - month_start).days
+
+
+def clamp_cycle_day(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 25
+    return max(1, min(28, parsed))
+
+
+def date_in_month(month_start, day):
+    return date(month_start.year, month_start.month, min(int(day), month_day_count(month_start)))
+
+
+def format_period_label(start_date, end_date):
+    inclusive_end = end_date - timedelta(days=1)
+    return f"{start_date.strftime('%d/%m/%Y')} - {inclusive_end.strftime('%d/%m/%Y')}"
+
+
+def resolve_profile_period(month_value, profile_mode, cycle_day):
+    profile_mode = str(profile_mode or "month").strip().lower()
+    profile_mode = "cycle" if profile_mode == "cycle" else "month"
+    cycle_day = clamp_cycle_day(cycle_day)
+    _month_key, start_date, end_date = month_bounds(month_value)
+
+    if profile_mode == "cycle":
+        previous_month = shift_month(start_date, -1)
+        start_date = date_in_month(previous_month, cycle_day)
+        end_date = date_in_month(shift_month(previous_month, 1), cycle_day)
+
+    return {
+        "mode": profile_mode,
+        "cycle_day": cycle_day,
+        "start_date": start_date,
+        "end_date": end_date,
+        "label": format_period_label(start_date, end_date),
+    }
 
 
 def entry_type_label(entry_type):
@@ -885,10 +982,9 @@ class ExpenseStore:
         state["entries"][email] = next_entries
         self.save_file_state(state)
 
-    def build_state(self, email, selected_month):
+    def build_state(self, email, selected_month, profile_mode="month", cycle_day=25):
         month_value, start_date, end_date = month_bounds(selected_month)
         entries = self.list_entries(email, start_date=start_date, end_date=end_date)
-        recent_entries = self.list_entries(email, limit=6)
         categories = self.list_categories(email, include_archived=True)
         usage = self.category_usage(email)
         categories_out = []
@@ -903,19 +999,36 @@ class ExpenseStore:
                 }
             )
 
-        trend_start = shift_month(start_date, -5)
-        trend_entries = self.list_entries(email, start_date=trend_start, end_date=end_date)
         summary = self.build_month_summary(entries, month_value)
-        trend = self.build_trend(trend_entries, start_date)
+        profile_period = resolve_profile_period(month_value, profile_mode, cycle_day)
+        if profile_period["start_date"] == start_date and profile_period["end_date"] == end_date:
+            profile_entries = entries
+        else:
+            profile_entries = self.list_entries(
+                email,
+                start_date=profile_period["start_date"],
+                end_date=profile_period["end_date"],
+            )
+        profile_summary = self.build_profile_summary(
+            profile_entries,
+            profile_period["start_date"],
+            profile_period["end_date"],
+        )
         return {
             "month": month_value,
             "month_label": month_label(month_value),
             "storage_mode": "database" if DB_MODE else "file",
             "categories": categories_out,
             "entries": entries,
-            "recent_entries": recent_entries,
             "summary": summary,
-            "trend": trend,
+            "profile_period": {
+                "mode": profile_period["mode"],
+                "cycle_day": profile_period["cycle_day"],
+                "label": profile_period["label"],
+                "start_date": profile_period["start_date"].isoformat(),
+                "end_date": (profile_period["end_date"] - timedelta(days=1)).isoformat(),
+            },
+            "profile_summary": profile_summary,
         }
 
     def build_month_summary(self, entries, month_value):
@@ -1017,6 +1130,81 @@ class ExpenseStore:
             "biggest_expense": biggest_expense,
         }
 
+    def build_profile_summary(self, entries, start_date, end_date):
+        expense_total = 0.0
+        income_total = 0.0
+        expense_count = 0
+        income_count = 0
+        active_days = set()
+        category_totals = {}
+        biggest_expense = None
+
+        for entry in entries:
+            amount = money_to_float(entry["amount"])
+            active_days.add(entry["occurred_on"])
+            if entry["entry_type"] == "income":
+                income_total += amount
+                income_count += 1
+            else:
+                expense_total += amount
+                expense_count += 1
+                category = entry.get("category")
+                if category:
+                    bucket = category_totals.setdefault(
+                        int(category["id"]),
+                        {
+                            "category_id": int(category["id"]),
+                            "name": category["name"],
+                            "color": category["color"],
+                            "amount": 0.0,
+                        },
+                    )
+                    bucket["amount"] += amount
+                else:
+                    bucket = category_totals.setdefault(
+                        0,
+                        {
+                            "category_id": 0,
+                            "name": "Senza categoria",
+                            "color": "#8b6f47",
+                            "amount": 0.0,
+                        },
+                    )
+                    bucket["amount"] += amount
+                if biggest_expense is None or amount > biggest_expense["amount"]:
+                    biggest_expense = {
+                        "id": entry["id"],
+                        "title": entry["title"],
+                        "amount": round(amount, 2),
+                        "occurred_on": entry["occurred_on"],
+                    }
+
+        period_days = max(1, (end_date - start_date).days)
+        balance = round(income_total - expense_total, 2)
+        category_totals_list = sorted(category_totals.values(), key=lambda item: item["amount"], reverse=True)
+        average_expense = round(expense_total / expense_count, 2) if expense_count else 0.0
+        average_income = round(income_total / income_count, 2) if income_count else 0.0
+        daily_expense = round(expense_total / period_days, 2)
+        savings_rate = round((balance / income_total) * 100, 1) if income_total > 0 else None
+
+        return {
+            "expense_total": round(expense_total, 2),
+            "income_total": round(income_total, 2),
+            "balance": balance,
+            "expense_count": expense_count,
+            "income_count": income_count,
+            "transaction_count": len(entries),
+            "active_days": len(active_days),
+            "average_expense": average_expense,
+            "average_income": average_income,
+            "daily_expense": daily_expense,
+            "savings_rate": savings_rate,
+            "period_days": period_days,
+            "top_category": category_totals_list[0] if category_totals_list else None,
+            "category_totals": category_totals_list,
+            "biggest_expense": biggest_expense,
+        }
+
     def build_trend(self, entries, selected_start):
         months = []
         month_index = {}
@@ -1050,8 +1238,11 @@ class ExpenseStore:
             item["balance"] = round(item["income_total"] - item["expense_total"], 2)
         return months
 
-    def export_csv(self, email, selected_month):
+    def export_csv(self, email, selected_month, profile_mode="month", cycle_day=25):
         month_value, start_date, end_date = month_bounds(selected_month)
+        period = resolve_profile_period(month_value, profile_mode, cycle_day)
+        start_date = period["start_date"]
+        end_date = period["end_date"]
         entries = self.list_entries(email, start_date=start_date, end_date=end_date)
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -1068,7 +1259,7 @@ class ExpenseStore:
                 ]
             )
         raw = buffer.getvalue().encode("utf-8-sig")
-        return month_value, raw
+        return period["label"].replace("/", "-").replace(" ", "_"), raw
 
 
 store = ExpenseStore(DATA_FILE)
@@ -1098,6 +1289,8 @@ def login_required(fn):
 
 @app.get("/manifest.webmanifest")
 def manifest_webmanifest():
+    icon = get_pwa_icon_descriptor()
+    icon_src = f"/app-icon?v={pwa_icon_cache_tag(icon)}" if icon.get("is_custom") else versioned_asset("/pwa-icon.svg")
     manifest = {
         "name": APP_NAME,
         "short_name": SHORT_NAME,
@@ -1110,10 +1303,10 @@ def manifest_webmanifest():
         "theme_color": pwa_color(THEME_COLOR, "#1f7a6f"),
         "icons": [
             {
-                "src": versioned_asset("/pwa-icon.svg"),
-                "sizes": "any",
-                "type": "image/svg+xml",
-                "purpose": "any maskable",
+                "src": icon_src,
+                "sizes": icon["sizes"],
+                "type": icon["type"],
+                "purpose": icon["purpose"],
             }
         ],
     }
@@ -1122,14 +1315,16 @@ def manifest_webmanifest():
 
 @app.get("/service-worker.js")
 def service_worker():
+    icon = get_pwa_icon_descriptor()
+    icon_url = f"/app-icon?v={pwa_icon_cache_tag(icon)}" if icon.get("is_custom") else versioned_asset("/pwa-icon.svg")
     script = """
-const CACHE_NAME = "spese-mixet-v2";
+const CACHE_NAME = "spese-mixet-__ASSET_VERSION__";
 const APP_SHELL = [
   "/",
-  "/manifest.webmanifest?v=2026-05-18-v2",
-  "/pwa-icon.svg?v=2026-05-18-v2",
-  "/static/styles.css?v=2026-05-18-v2",
-  "/static/app.js?v=2026-05-18-v2"
+  "/manifest.webmanifest?v=__ASSET_VERSION__",
+  "__ICON_URL__",
+  "/static/styles.css?v=__ASSET_VERSION__",
+  "/static/app.js?v=__ASSET_VERSION__"
 ];
 
 function isDynamicRequest(url) {
@@ -1174,7 +1369,25 @@ self.addEventListener("fetch", (event) => {
   );
 });
 """.strip()
+    script = script.replace("__ASSET_VERSION__", ASSET_VERSION)
+    script = script.replace("__ICON_URL__", icon_url)
     return Response(script, mimetype="application/javascript", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/app-icon")
+def app_icon():
+    icon = get_pwa_icon_descriptor()
+    if icon.get("is_custom") and icon.get("full_path"):
+        return send_file(icon["full_path"], mimetype=icon["type"], max_age=300)
+    return pwa_icon()
+
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    icon = get_pwa_icon_descriptor()
+    if icon.get("is_custom") and icon.get("full_path"):
+        return send_file(icon["full_path"], mimetype=icon["type"], max_age=300)
+    return pwa_icon()
 
 
 @app.get("/pwa-icon.svg")
@@ -1203,6 +1416,10 @@ def pwa_icon():
 @app.get("/")
 def index():
     today = date.today()
+    icon = get_pwa_icon_descriptor()
+    icon_tag = pwa_icon_cache_tag(icon)
+    icon_href = f"/app-icon?v={icon_tag}" if icon.get("is_custom") else versioned_asset("/pwa-icon.svg")
+    apple_icon_href = f"/apple-touch-icon.png?v={icon_tag}" if icon.get("is_custom") else versioned_asset("/pwa-icon.svg")
     return render_template(
         "index.html",
         today_date=today.strftime("%Y-%m-%d"),
@@ -1211,6 +1428,8 @@ def index():
         pwa_app_name=APP_NAME,
         pwa_short_name=SHORT_NAME,
         pwa_theme_color=pwa_color(THEME_COLOR, "#1f7a6f"),
+        pwa_icon_href=icon_href,
+        pwa_apple_icon_href=apple_icon_href,
         asset_version=ASSET_VERSION,
     )
 
@@ -1288,8 +1507,10 @@ def auth_logout():
 def api_state():
     try:
         month_value = request.args.get("month", "")
+        profile_mode = request.args.get("profile_mode", "month")
+        cycle_day = request.args.get("cycle_day", "25")
         with lock:
-            payload = store.build_state(g.current_user["email"], month_value)
+            payload = store.build_state(g.current_user["email"], month_value, profile_mode=profile_mode, cycle_day=cycle_day)
     except ValueError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
     return jsonify({"ok": True, **payload})
@@ -1373,8 +1594,15 @@ def api_delete_entry(entry_id):
 @login_required
 def api_export_csv():
     try:
+        profile_mode = request.args.get("profile_mode", "month")
+        cycle_day = request.args.get("cycle_day", "25")
         with lock:
-            month_value, raw = store.export_csv(g.current_user["email"], request.args.get("month", ""))
+            month_value, raw = store.export_csv(
+                g.current_user["email"],
+                request.args.get("month", ""),
+                profile_mode=profile_mode,
+                cycle_day=cycle_day,
+            )
     except ValueError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
     return send_file(

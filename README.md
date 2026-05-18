@@ -38,6 +38,7 @@ PWA per tracciare spese ed entrate con:
    $env:PWA_SHORT_NAME="Mixet"
    $env:PWA_THEME_COLOR="#1f7a6f"
    $env:PWA_BG_COLOR="#f7f1e8"
+   $env:PWA_ICON_FILE="pwa-icon.png"
    $env:PWA_PORT="8010"
    $env:SPESE_MIXET_SESSION_DAYS="90"
    ```
@@ -114,6 +115,43 @@ Variabili ambiente consigliate:
 - insight mensili con saldo, spesa media, categoria top e andamento ultimi 6 mesi
 - export CSV del mese selezionato
 - PWA installabile con cache della shell applicativa
+
+## Icona personalizzata
+
+Puoi usare una tua icona senza cambiare codice.
+
+Opzione piu semplice:
+
+1. metti il file dentro `static/`
+2. chiamalo ad esempio `pwa-icon.png`
+3. riavvia l'app
+
+Opzione esplicita con variabile ambiente:
+
+```powershell
+$env:PWA_ICON_FILE="mia-icona.png"
+```
+
+Formati supportati:
+
+- `.png`
+- `.jpg`
+- `.jpeg`
+- `.svg`
+
+Se non imposti nulla, l'app prova in automatico questi nomi dentro `static/`:
+
+- `pwa-icon.png`
+- `pwa-icon-512.png`
+- `pwa-icon.jpg`
+- `pwa-icon.jpeg`
+- `pwa-icon.svg`
+- `icon.png`
+- `icon.jpg`
+- `icon.jpeg`
+- `icon.svg`
+
+Se non trova nessun file, usa l'icona SVG generata di default.
 
 ## Sync Postepay
 
