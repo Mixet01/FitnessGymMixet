@@ -7,21 +7,39 @@
     storageMode: "database",
     categories: [],
     entries: [],
-    recentEntries: [],
     summary: {
+      expense_total: 0,
+      income_total: 0,
+      balance: 0,
+      top_category: null,
+      category_totals: [],
+    },
+    profileMode: "month",
+    profileCycleDay: 25,
+    profilePeriod: {
+      label: "",
+      mode: "month",
+      start_date: "",
+      end_date: "",
+      cycle_day: 25,
+    },
+    profileSummary: {
       expense_total: 0,
       income_total: 0,
       balance: 0,
       transaction_count: 0,
       average_expense: 0,
+      average_income: 0,
       daily_expense: 0,
       active_days: 0,
       savings_rate: null,
-      category_totals: [],
-      weekly_totals: [],
+      period_days: 0,
       top_category: null,
+      category_totals: [],
+      biggest_expense: null,
+      expense_count: 0,
+      income_count: 0,
     },
-    trend: [],
     filterType: "all",
     search: "",
     editingEntryId: null,
@@ -46,33 +64,38 @@
     metricBalanceNote: document.getElementById("metric-balance-note"),
     metricExpense: document.getElementById("metric-expense"),
     metricIncome: document.getElementById("metric-income"),
-    metricCount: document.getElementById("metric-count"),
     topCategoryTag: document.getElementById("top-category-tag"),
     categoryBars: document.getElementById("category-bars"),
-    weekBars: document.getElementById("week-bars"),
-    trendBars: document.getElementById("trend-bars"),
-    recentList: document.getElementById("recent-list"),
-    storageBadge: document.getElementById("storage-badge"),
     movementList: document.getElementById("movement-list"),
     categoryGrid: document.getElementById("category-grid"),
     searchInput: document.getElementById("search-input"),
     filterButtons: Array.from(document.querySelectorAll("[data-filter-type]")),
     navButtons: Array.from(document.querySelectorAll(".nav-btn")),
     screens: Array.from(document.querySelectorAll(".screen")),
-    openMovements: document.getElementById("open-movements"),
     headerAddEntry: document.getElementById("header-add-entry"),
     movementsAddEntry: document.getElementById("movements-add-entry"),
     fabEntry: document.getElementById("fab-entry"),
     addCategory: document.getElementById("add-category"),
+    quickCategoryName: document.getElementById("category-quick-name"),
+    quickCategoryColor: document.getElementById("category-quick-color"),
+    saveQuickCategory: document.getElementById("save-quick-category"),
     exportCsv: document.getElementById("export-csv"),
     logoutBtn: document.getElementById("logout-btn"),
     profileName: document.getElementById("profile-name"),
     profileEmail: document.getElementById("profile-email"),
     profileAvatar: document.getElementById("profile-avatar"),
+    profileModeButtons: Array.from(document.querySelectorAll("[data-profile-mode]")),
+    profileCycleDay: document.getElementById("profile-cycle-day"),
+    profilePeriodLabel: document.getElementById("profile-period-label"),
+    profileBalance: document.getElementById("profile-balance"),
+    profileExpenseTotal: document.getElementById("profile-expense-total"),
+    profileIncomeTotal: document.getElementById("profile-income-total"),
+    profileCount: document.getElementById("profile-count"),
     profileAverage: document.getElementById("profile-average"),
     profileDaily: document.getElementById("profile-daily"),
     profileDays: document.getElementById("profile-days"),
     profileSavingRate: document.getElementById("profile-saving-rate"),
+    profileBreakdown: document.getElementById("profile-breakdown"),
     entryModal: document.getElementById("entry-modal"),
     entryModalTitle: document.getElementById("entry-modal-title"),
     closeEntryModal: document.getElementById("close-entry-modal"),
@@ -96,7 +119,7 @@
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
   const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
-  const assetVersion = (els.body.dataset.assetVersion || "2026-05-18-v2").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-18-v4").trim();
   const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
   const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
   const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
@@ -169,12 +192,17 @@
   function renderCategoryOptions(selectedId) {
     const options = ['<option value="">Senza categoria</option>'];
     state.categories.forEach((category) => {
-      const suffix = category.archived ? " (archiviata)" : "";
+      if (category.archived) return;
       options.push(
-        `<option value="${category.id}" ${Number(selectedId || 0) === Number(category.id) ? "selected" : ""}>${escapeHtml(category.name + suffix)}</option>`
+        `<option value="${category.id}" ${Number(selectedId || 0) === Number(category.id) ? "selected" : ""}>${escapeHtml(category.name)}</option>`
       );
     });
     els.entryCategory.innerHTML = options.join("");
+  }
+
+  function resetQuickCategoryForm() {
+    els.quickCategoryName.value = "";
+    els.quickCategoryColor.value = "#1f7a6f";
   }
 
   function openEntryModal(entry) {
@@ -213,13 +241,11 @@
   function renderMetrics() {
     const balance = Number(state.summary.balance || 0);
     els.metricBalance.textContent = formatMoney(balance);
-    els.metricBalanceNote.textContent = balance >= 0 ? "Bilancio in positivo" : "Bilancio da tenere d'occhio";
+    els.metricBalanceNote.textContent = balance >= 0 ? "Entrate meno uscite del mese" : "Periodo da tenere sotto controllo";
     els.metricExpense.textContent = formatMoney(state.summary.expense_total || 0);
     els.metricIncome.textContent = formatMoney(state.summary.income_total || 0);
-    els.metricCount.textContent = String(state.summary.transaction_count || 0);
     const top = state.summary.top_category;
     els.topCategoryTag.textContent = top ? `${top.name} - ${formatMoney(top.amount)}` : "Nessuna";
-    els.storageBadge.textContent = state.storageMode === "database" ? "supabase" : "file locale";
   }
 
   function renderCategoryBars() {
@@ -243,67 +269,6 @@
         </div>
       `;
     }).join("");
-  }
-
-  function renderWeekBars() {
-    const items = state.summary.weekly_totals || [];
-    if (!items.length) {
-      els.weekBars.innerHTML = "<div class='empty-state'>Nessun dato disponibile.</div>";
-      return;
-    }
-    els.weekBars.innerHTML = items.map((item) => {
-      const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
-      return `
-        <article class="week-card">
-          <span class="mini-label">Set ${escapeHtml(item.label)}</span>
-          <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
-          <p class="helper">Spese ${escapeHtml(formatMoney(item.expense_total))}</p>
-        </article>
-      `;
-    }).join("");
-  }
-
-  function renderTrendBars() {
-    const items = state.trend || [];
-    if (!items.length) {
-      els.trendBars.innerHTML = "<div class='empty-state'>Trend non disponibile.</div>";
-      return;
-    }
-    els.trendBars.innerHTML = items.map((item) => {
-      const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
-      return `
-        <article class="trend-card">
-          <span class="mini-label">${escapeHtml(item.label)}</span>
-          <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
-          <p class="helper">Uscite ${escapeHtml(formatMoney(item.expense_total))}</p>
-        </article>
-      `;
-    }).join("");
-  }
-
-  function recentRowMarkup(entry) {
-    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#27e89d" : "#ff4d7a");
-    const amountClass = entry.entry_type === "income" ? "income" : "expense";
-    return `
-      <article class="recent-row" data-entry-id="${entry.id}">
-        <span class="dot" style="background:${escapeHtml(dotColor)};"></span>
-        <div class="recent-copy">
-          <strong>${escapeHtml(entry.title)}</strong>
-          <p>${escapeHtml(formatShortDate(entry.occurred_on))}${entry.category ? ` - ${escapeHtml(entry.category.name)}` : ""}</p>
-        </div>
-        <div class="movement-amount">
-          <strong class="${amountClass}">${escapeHtml(formatMoney(entry.amount))}</strong>
-        </div>
-      </article>
-    `;
-  }
-
-  function renderRecentEntries() {
-    if (!state.recentEntries.length) {
-      els.recentList.innerHTML = "<div class='empty-state'>Ancora nessun movimento salvato.</div>";
-      return;
-    }
-    els.recentList.innerHTML = state.recentEntries.map(recentRowMarkup).join("");
   }
 
   function filteredEntries() {
@@ -378,14 +343,52 @@
     `).join("");
   }
 
+  function renderProfileBreakdown() {
+    const summary = state.profileSummary;
+    const lines = [
+      `Periodo attivo: ${state.profilePeriod.label || "-"}`,
+      `Numero spese: ${summary.expense_count || 0}`,
+      `Numero entrate: ${summary.income_count || 0}`,
+      `Media entrate: ${formatMoney(summary.average_income || 0)}`,
+      `Giorni coperti: ${summary.period_days || 0}`,
+      `Categoria piu pesante: ${summary.top_category ? `${summary.top_category.name} - ${formatMoney(summary.top_category.amount)}` : "Nessuna"}`,
+      `Spesa piu alta: ${summary.biggest_expense ? `${summary.biggest_expense.title} - ${formatMoney(summary.biggest_expense.amount)} (${formatShortDate(summary.biggest_expense.occurred_on)})` : "Nessuna"}`,
+    ];
+
+    const categoryLines = (summary.category_totals || []).slice(0, 5).map((item) => {
+      return `Categoria: ${item.name} - ${formatMoney(item.amount)}`;
+    });
+
+    const allLines = lines.concat(categoryLines);
+    els.profileBreakdown.innerHTML = allLines.map((line) => `
+      <article class="recent-row compact-row">
+        <div class="recent-copy">
+          <p>${escapeHtml(line)}</p>
+        </div>
+      </article>
+    `).join("");
+  }
+
   function renderProfile() {
     const user = state.me || {};
+    const summary = state.profileSummary || {};
     els.profileName.textContent = user.name || "Profilo";
     els.profileEmail.textContent = user.email || "";
-    els.profileAverage.textContent = formatMoney(state.summary.average_expense || 0);
-    els.profileDaily.textContent = formatMoney(state.summary.daily_expense || 0);
-    els.profileDays.textContent = String(state.summary.active_days || 0);
-    els.profileSavingRate.textContent = state.summary.savings_rate == null ? "-" : `${state.summary.savings_rate}%`;
+    els.profilePeriodLabel.value = state.profilePeriod.label || "";
+    els.profileCycleDay.value = String(state.profilePeriod.cycle_day || state.profileCycleDay || 25);
+    els.profileCycleDay.disabled = state.profileMode !== "cycle";
+    els.profileBalance.textContent = formatMoney(summary.balance || 0);
+    els.profileExpenseTotal.textContent = formatMoney(summary.expense_total || 0);
+    els.profileIncomeTotal.textContent = formatMoney(summary.income_total || 0);
+    els.profileCount.textContent = String(summary.transaction_count || 0);
+    els.profileAverage.textContent = formatMoney(summary.average_expense || 0);
+    els.profileDaily.textContent = formatMoney(summary.daily_expense || 0);
+    els.profileDays.textContent = String(summary.active_days || 0);
+    els.profileSavingRate.textContent = summary.savings_rate == null ? "-" : `${summary.savings_rate}%`;
+    els.profileModeButtons.forEach((button) => {
+      button.classList.toggle("active", button.dataset.profileMode === state.profileMode);
+    });
+    renderProfileBreakdown();
 
     if (user.picture) {
       els.profileAvatar.innerHTML = `<img src="${escapeHtml(user.picture)}" alt="${escapeHtml(user.name || "avatar")}" style="width:100%;height:100%;object-fit:cover;border-radius:22px;">`;
@@ -398,9 +401,6 @@
     renderCategoryOptions(null);
     renderMetrics();
     renderCategoryBars();
-    renderWeekBars();
-    renderTrendBars();
-    renderRecentEntries();
     renderMovements();
     renderCategories();
     renderProfile();
@@ -409,9 +409,7 @@
 
   function entryById(entryId) {
     const targetId = Number(entryId);
-    return state.entries.find((entry) => Number(entry.id) === targetId)
-      || state.recentEntries.find((entry) => Number(entry.id) === targetId)
-      || null;
+    return state.entries.find((entry) => Number(entry.id) === targetId) || null;
   }
 
   function categoryById(categoryId) {
@@ -431,15 +429,20 @@
   }
 
   async function refreshState() {
-    const data = await api(`/api/state?month=${encodeURIComponent(state.month)}`);
+    const params = new URLSearchParams({
+      month: state.month,
+      profile_mode: state.profileMode,
+      cycle_day: String(state.profileCycleDay),
+    });
+    const data = await api(`/api/state?${params.toString()}`);
     state.month = data.month;
     state.monthLabel = data.month_label;
     state.storageMode = data.storage_mode;
     state.categories = data.categories || [];
     state.entries = data.entries || [];
-    state.recentEntries = data.recent_entries || [];
     state.summary = data.summary || state.summary;
-    state.trend = data.trend || [];
+    state.profilePeriod = data.profile_period || state.profilePeriod;
+    state.profileSummary = data.profile_summary || state.profileSummary;
     renderApp();
   }
 
@@ -467,6 +470,20 @@
     if (!window.confirm("Eliminare questo movimento?")) return;
     await api(`/api/entries/${entryId}`, { method: "DELETE" });
     closeEntryModal();
+    await refreshState();
+  }
+
+  async function saveQuickCategory() {
+    await api("/api/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: els.quickCategoryName.value,
+        color: els.quickCategoryColor.value,
+        archived: false,
+      }),
+    });
+    resetQuickCategoryForm();
     await refreshState();
   }
 
@@ -553,12 +570,19 @@
 
     els.monthPrev.addEventListener("click", () => shiftMonth(-1));
     els.monthNext.addEventListener("click", () => shiftMonth(1));
-    els.openMovements.addEventListener("click", () => setActiveScreen("screen-movements"));
 
     [els.headerAddEntry, els.movementsAddEntry, els.fabEntry].forEach((button) => {
       button.addEventListener("click", () => openEntryModal(null));
     });
-    els.addCategory.addEventListener("click", () => openCategoryModal(null));
+
+    els.addCategory.addEventListener("click", () => {
+      resetQuickCategoryForm();
+      els.quickCategoryName.focus();
+    });
+
+    els.saveQuickCategory.addEventListener("click", () => {
+      saveQuickCategory().catch((err) => alert(err.message));
+    });
 
     els.closeEntryModal.addEventListener("click", closeEntryModal);
     els.closeCategoryModal.addEventListener("click", closeCategoryModal);
@@ -591,6 +615,23 @@
       });
     });
 
+    els.profileModeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        state.profileMode = button.dataset.profileMode;
+        refreshState().catch((err) => alert(err.message));
+      });
+    });
+
+    els.profileCycleDay.addEventListener("change", () => {
+      const nextDay = Number(els.profileCycleDay.value || 25);
+      state.profileCycleDay = Math.max(1, Math.min(28, nextDay));
+      if (state.profileMode === "cycle") {
+        refreshState().catch((err) => alert(err.message));
+      } else {
+        els.profileCycleDay.value = String(state.profileCycleDay);
+      }
+    });
+
     els.searchInput.addEventListener("input", () => {
       state.search = els.searchInput.value || "";
       renderMovements();
@@ -608,15 +649,6 @@
       }
     });
 
-    els.recentList.addEventListener("click", (event) => {
-      const row = event.target.closest("[data-entry-id]");
-      if (!row) return;
-      const entry = entryById(row.dataset.entryId);
-      if (!entry) return;
-      setActiveScreen("screen-movements");
-      openEntryModal(entry);
-    });
-
     els.categoryGrid.addEventListener("click", (event) => {
       const action = event.target.closest("[data-category-action]");
       if (!action) return;
@@ -630,7 +662,12 @@
     });
 
     els.exportCsv.addEventListener("click", () => {
-      window.open(`/api/export.csv?month=${encodeURIComponent(state.month)}`, "_blank");
+      const params = new URLSearchParams({
+        month: state.month,
+        profile_mode: state.profileMode,
+        cycle_day: String(state.profileCycleDay),
+      });
+      window.open(`/api/export.csv?${params.toString()}`, "_blank");
     });
 
     els.logoutBtn.addEventListener("click", () => {

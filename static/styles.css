@@ -375,7 +375,7 @@ textarea:focus {
 
 .hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr) minmax(0, 0.75fr);
   gap: 12px;
 }
 
@@ -455,6 +455,10 @@ textarea:focus {
   align-items: start;
 }
 
+.dashboard-single {
+  grid-template-columns: 1fr;
+}
+
 .panel {
   position: relative;
   overflow: hidden;
@@ -471,6 +475,10 @@ textarea:focus {
 
 .panel-head.blocky {
   align-items: flex-start;
+}
+
+.panel-head.compact {
+  margin-bottom: 12px;
 }
 
 .panel-head h3 {
@@ -643,6 +651,16 @@ textarea:focus {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+.quick-category-card,
+.profile-period-card,
+.inset-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15, 29, 54, 0.96) 0%, rgba(10, 20, 38, 0.96) 100%);
+}
+
 .category-card {
   position: relative;
   overflow: hidden;
@@ -711,6 +729,10 @@ textarea:focus {
   margin-top: 22px;
 }
 
+.period-grid input[readonly] {
+  color: var(--text-soft);
+}
+
 .profile-stat {
   position: relative;
   overflow: hidden;
@@ -722,6 +744,14 @@ textarea:focus {
 
 .profile-actions {
   margin-top: 18px;
+}
+
+.compact-row {
+  grid-template-columns: 1fr;
+}
+
+.compact-row .recent-copy p {
+  margin-top: 0;
 }
 
 .bottom-nav {
