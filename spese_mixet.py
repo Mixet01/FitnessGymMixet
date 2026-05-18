@@ -33,6 +33,8 @@ BG_COLOR = os.environ.get("PWA_BG_COLOR", "#f7f1e8").strip() or "#f7f1e8"
 ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "SM").strip() or "SM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
+SESSION_DAYS = int(os.environ.get("SPESE_MIXET_SESSION_DAYS", "90"))
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-18-v2").strip() or "2026-05-18-v2"
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -49,7 +51,12 @@ lock = Lock()
 
 app = Flask(__name__, template_folder=os.path.join(BASE_DIR, "templates"), static_folder=os.path.join(BASE_DIR, "static"))
 app.secret_key = os.environ.get("SPESE_MIXET_SECRET", "change-me-in-production")
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=SESSION_DAYS)
+app.config["SESSION_COOKIE_NAME"] = "spese_mixet_session"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SPESE_MIXET_SECURE_COOKIE", "0") == "1"
+app.config["SESSION_REFRESH_EACH_REQUEST"] = True
 
 
 def normalize_email(value):
@@ -71,6 +78,14 @@ def pwa_color(value, fallback):
 def pwa_label(value):
     cleaned = re.sub(r"[^A-Za-z0-9 ]", "", str(value or "").strip().upper())
     return (cleaned[:3] or "SM").strip()
+
+
+def versioned_asset(path):
+    clean_path = str(path or "").strip()
+    if not clean_path:
+        return ""
+    sep = "&" if "?" in clean_path else "?"
+    return f"{clean_path}{sep}v={ASSET_VERSION}"
 
 
 def sanitize_color(value, fallback="#1f7a6f"):
@@ -1095,7 +1110,7 @@ def manifest_webmanifest():
         "theme_color": pwa_color(THEME_COLOR, "#1f7a6f"),
         "icons": [
             {
-                "src": "/pwa-icon.svg",
+                "src": versioned_asset("/pwa-icon.svg"),
                 "sizes": "any",
                 "type": "image/svg+xml",
                 "purpose": "any maskable",
@@ -1108,13 +1123,13 @@ def manifest_webmanifest():
 @app.get("/service-worker.js")
 def service_worker():
     script = """
-const CACHE_NAME = "spese-mixet-v1";
+const CACHE_NAME = "spese-mixet-v2";
 const APP_SHELL = [
   "/",
-  "/manifest.webmanifest",
-  "/pwa-icon.svg",
-  "/static/styles.css",
-  "/static/app.js"
+  "/manifest.webmanifest?v=2026-05-18-v2",
+  "/pwa-icon.svg?v=2026-05-18-v2",
+  "/static/styles.css?v=2026-05-18-v2",
+  "/static/app.js?v=2026-05-18-v2"
 ];
 
 function isDynamicRequest(url) {
@@ -1159,7 +1174,7 @@ self.addEventListener("fetch", (event) => {
   );
 });
 """.strip()
-    return Response(script, mimetype="application/javascript")
+    return Response(script, mimetype="application/javascript", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/pwa-icon.svg")
@@ -1196,6 +1211,7 @@ def index():
         pwa_app_name=APP_NAME,
         pwa_short_name=SHORT_NAME,
         pwa_theme_color=pwa_color(THEME_COLOR, "#1f7a6f"),
+        asset_version=ASSET_VERSION,
     )
 
 

@@ -39,6 +39,7 @@ PWA per tracciare spese ed entrate con:
    $env:PWA_THEME_COLOR="#1f7a6f"
    $env:PWA_BG_COLOR="#f7f1e8"
    $env:PWA_PORT="8010"
+   $env:SPESE_MIXET_SESSION_DAYS="90"
    ```
 
 3. Avvia il server:
@@ -113,3 +114,20 @@ Variabili ambiente consigliate:
 - insight mensili con saldo, spesa media, categoria top e andamento ultimi 6 mesi
 - export CSV del mese selezionato
 - PWA installabile con cache della shell applicativa
+
+## Sync Postepay
+
+Il collegamento automatico con saldo e movimenti Postepay non passa da scraping o login diretto nel sito Poste. La strada corretta e conforme e usare un provider Open Banking / PSD2 autorizzato.
+
+In pratica servono:
+
+- un provider AISP/TPP o un aggregatore che supporti Postepay
+- credenziali/API key del provider
+- eventuale onboarding contrattuale e redirect OAuth/SCA
+
+Fonti ufficiali utili:
+
+- Poste Italiane espone BancoPosta e Postepay alle Terze Parti PSD2 tramite CBI Globe
+- la pagina Open Banking di Poste indica che una Terza Parte autorizzata puo accedere alle informazioni di Conto BancoPosta e Carta Postepay previo consenso
+
+Una strada concreta da valutare e un provider come Enable Banking, che nel changelog dell'8 aprile 2026 dichiara supporto per Poste Italiane / Postepay su account personali e business.
