@@ -6,30 +6,28 @@
   <title>{{ pwa_app_name }}</title>
   <meta name="theme-color" content="{{ pwa_theme_color }}">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="{{ pwa_short_name }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-  <link rel="manifest" href="{{ url_for('manifest_webmanifest') }}">
-  <link rel="icon" href="/pwa-icon.svg">
-  <link rel="apple-touch-icon" href="/pwa-icon.svg">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="manifest" href="{{ url_for('manifest_webmanifest') }}?v={{ asset_version }}">
+  <link rel="icon" href="/pwa-icon.svg?v={{ asset_version }}">
+  <link rel="apple-touch-icon" href="/pwa-icon.svg?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}?v={{ asset_version }}">
 </head>
 <body
   data-today="{{ today_date }}"
   data-month="{{ current_month }}"
   data-google-client-id="{{ google_client_id }}"
   data-pwa-app-name="{{ pwa_app_name }}"
+  data-asset-version="{{ asset_version }}"
 >
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
-
   <section id="auth-gate" class="gate">
     <article class="hero-panel">
       <p class="eyebrow">PWA personale</p>
-      <h1>Controlla ogni euro con una vista chiara, installabile e tutta tua.</h1>
-      <p class="lead">Spese Mixet unisce accesso Google, database Supabase, categorie personalizzate e una dashboard pensata per telefono.</p>
+      <h1>Gestisci spese e saldo con lo stesso feeling dell'altra app.</h1>
+      <p class="lead">Spese Mixet tiene insieme categorie personalizzate, dashboard mensile e accesso persistente, con un'interfaccia coerente con la PWA originale.</p>
       <div class="hero-pills">
         <span>Spese ed entrate</span>
         <span>Categorie custom</span>
@@ -41,7 +39,7 @@
       <p class="eyebrow">Accesso</p>
       <h2>Entra nella tua area</h2>
       {% if google_client_id %}
-      <p class="helper">Accedi con Google per sincronizzare i tuoi dati tra dispositivi.</p>
+      <p class="helper">Accedi con Google e l'app manterra la sessione attiva anche alle riaperture successive.</p>
       <div id="google-signin"></div>
       {% else %}
       <p class="helper">Google non configurato. Usa l'accesso di sviluppo.</p>
@@ -295,6 +293,6 @@
   {% if google_client_id %}
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   {% endif %}
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>
