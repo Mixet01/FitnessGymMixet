@@ -96,6 +96,7 @@
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
   const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-18-v2").trim();
   const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
   const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
   const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
@@ -165,6 +166,17 @@
     refreshState().catch((err) => alert(err.message));
   }
 
+  function renderCategoryOptions(selectedId) {
+    const options = ['<option value="">Senza categoria</option>'];
+    state.categories.forEach((category) => {
+      const suffix = category.archived ? " (archiviata)" : "";
+      options.push(
+        `<option value="${category.id}" ${Number(selectedId || 0) === Number(category.id) ? "selected" : ""}>${escapeHtml(category.name + suffix)}</option>`
+      );
+    });
+    els.entryCategory.innerHTML = options.join("");
+  }
+
   function openEntryModal(entry) {
     state.editingEntryId = entry ? entry.id : null;
     els.entryModalTitle.textContent = entry ? "Modifica movimento" : "Nuovo movimento";
@@ -173,7 +185,7 @@
     els.entryDate.value = entry ? entry.occurred_on : (els.body.dataset.today || "");
     els.entryTitle.value = entry ? entry.title : "";
     els.entryAmount.value = entry ? Number(entry.amount).toFixed(2) : "";
-    renderCategoryOptions(entry ? entry.category && entry.category.id : null);
+    renderCategoryOptions(entry && entry.category ? entry.category.id : null);
     els.entryNotes.value = entry ? entry.notes : "";
     els.entryModal.classList.remove("hidden");
   }
@@ -198,17 +210,6 @@
     els.categoryModal.classList.add("hidden");
   }
 
-  function renderCategoryOptions(selectedId) {
-    const options = ['<option value="">Senza categoria</option>'];
-    state.categories.forEach((category) => {
-      const suffix = category.archived ? " (archiviata)" : "";
-      options.push(
-        `<option value="${category.id}" ${Number(selectedId || 0) === Number(category.id) ? "selected" : ""}>${escapeHtml(category.name + suffix)}</option>`
-      );
-    });
-    els.entryCategory.innerHTML = options.join("");
-  }
-
   function renderMetrics() {
     const balance = Number(state.summary.balance || 0);
     els.metricBalance.textContent = formatMoney(balance);
@@ -217,7 +218,7 @@
     els.metricIncome.textContent = formatMoney(state.summary.income_total || 0);
     els.metricCount.textContent = String(state.summary.transaction_count || 0);
     const top = state.summary.top_category;
-    els.topCategoryTag.textContent = top ? `${top.name} · ${formatMoney(top.amount)}` : "Nessuna";
+    els.topCategoryTag.textContent = top ? `${top.name} - ${formatMoney(top.amount)}` : "Nessuna";
     els.storageBadge.textContent = state.storageMode === "database" ? "supabase" : "file locale";
   }
 
@@ -228,22 +229,20 @@
       return;
     }
     const maxValue = Math.max(...items.map((item) => Number(item.amount || 0)), 1);
-    els.categoryBars.innerHTML = items
-      .map((item) => {
-        const width = Math.max(8, Math.round((Number(item.amount || 0) / maxValue) * 100));
-        return `
-          <div class="bar-row">
-            <div class="bar-meta">
-              <span>${escapeHtml(item.name)}</span>
-              <strong>${escapeHtml(formatMoney(item.amount))}</strong>
-            </div>
-            <div class="bar-track">
-              <div class="bar-fill" style="width:${width}%; background:${escapeHtml(item.color)};"></div>
-            </div>
+    els.categoryBars.innerHTML = items.map((item) => {
+      const width = Math.max(8, Math.round((Number(item.amount || 0) / maxValue) * 100));
+      return `
+        <div class="bar-row">
+          <div class="bar-meta">
+            <span>${escapeHtml(item.name)}</span>
+            <strong>${escapeHtml(formatMoney(item.amount))}</strong>
           </div>
-        `;
-      })
-      .join("");
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${width}%; background:${escapeHtml(item.color)};"></div>
+          </div>
+        </div>
+      `;
+    }).join("");
   }
 
   function renderWeekBars() {
@@ -252,18 +251,16 @@
       els.weekBars.innerHTML = "<div class='empty-state'>Nessun dato disponibile.</div>";
       return;
     }
-    els.weekBars.innerHTML = items
-      .map((item) => {
-        const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
-        return `
-          <article class="week-card">
-            <span class="mini-label">Set ${escapeHtml(item.label)}</span>
-            <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
-            <p class="helper">Spese ${escapeHtml(formatMoney(item.expense_total))}</p>
-          </article>
-        `;
-      })
-      .join("");
+    els.weekBars.innerHTML = items.map((item) => {
+      const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
+      return `
+        <article class="week-card">
+          <span class="mini-label">Set ${escapeHtml(item.label)}</span>
+          <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
+          <p class="helper">Spese ${escapeHtml(formatMoney(item.expense_total))}</p>
+        </article>
+      `;
+    }).join("");
   }
 
   function renderTrendBars() {
@@ -272,29 +269,27 @@
       els.trendBars.innerHTML = "<div class='empty-state'>Trend non disponibile.</div>";
       return;
     }
-    els.trendBars.innerHTML = items
-      .map((item) => {
-        const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
-        return `
-          <article class="trend-card">
-            <span class="mini-label">${escapeHtml(item.label)}</span>
-            <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
-            <p class="helper">Uscite ${escapeHtml(formatMoney(item.expense_total))}</p>
-          </article>
-        `;
-      })
-      .join("");
+    els.trendBars.innerHTML = items.map((item) => {
+      const balanceClass = Number(item.balance || 0) >= 0 ? "income" : "expense";
+      return `
+        <article class="trend-card">
+          <span class="mini-label">${escapeHtml(item.label)}</span>
+          <strong class="${balanceClass}">${escapeHtml(formatMoney(item.balance))}</strong>
+          <p class="helper">Uscite ${escapeHtml(formatMoney(item.expense_total))}</p>
+        </article>
+      `;
+    }).join("");
   }
 
   function recentRowMarkup(entry) {
-    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#2f8f5b" : "#d95d39");
+    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#27e89d" : "#ff4d7a");
     const amountClass = entry.entry_type === "income" ? "income" : "expense";
     return `
       <article class="recent-row" data-entry-id="${entry.id}">
         <span class="dot" style="background:${escapeHtml(dotColor)};"></span>
         <div class="recent-copy">
           <strong>${escapeHtml(entry.title)}</strong>
-          <p>${escapeHtml(formatShortDate(entry.occurred_on))}${entry.category ? ` · ${escapeHtml(entry.category.name)}` : ""}</p>
+          <p>${escapeHtml(formatShortDate(entry.occurred_on))}${entry.category ? ` - ${escapeHtml(entry.category.name)}` : ""}</p>
         </div>
         <div class="movement-amount">
           <strong class="${amountClass}">${escapeHtml(formatMoney(entry.amount))}</strong>
@@ -322,7 +317,7 @@
   }
 
   function movementRowMarkup(entry) {
-    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#2f8f5b" : "#d95d39");
+    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#27e89d" : "#ff4d7a");
     const amountClass = entry.entry_type === "income" ? "income" : "expense";
     const categoryLabel = entry.category ? entry.category.name : "Senza categoria";
     return `
@@ -330,7 +325,7 @@
         <span class="dot" style="background:${escapeHtml(dotColor)};"></span>
         <div class="movement-copy">
           <strong>${escapeHtml(entry.title)}</strong>
-          <p>${escapeHtml(formatShortDate(entry.occurred_on))} · ${escapeHtml(categoryLabel)}</p>
+          <p>${escapeHtml(formatShortDate(entry.occurred_on))} - ${escapeHtml(categoryLabel)}</p>
           ${entry.notes ? `<p>${escapeHtml(entry.notes)}</p>` : ""}
           <div class="movement-actions">
             <button class="mini-btn" data-entry-action="edit" data-entry-id="${entry.id}">Modifica</button>
@@ -359,32 +354,28 @@
       els.categoryGrid.innerHTML = "<div class='empty-state'>Crea la tua prima categoria personalizzata.</div>";
       return;
     }
-    els.categoryGrid.innerHTML = state.categories
-      .map((category) => {
-        return `
-          <article class="category-card" data-category-id="${category.id}">
-            <div class="category-head">
-              <div>
-                <div style="display:flex; align-items:center; gap:10px;">
-                  <span class="swatch" style="background:${escapeHtml(category.color)};"></span>
-                  <strong>${escapeHtml(category.name)}</strong>
-                </div>
-                <p class="helper">${category.archived ? "Categoria archiviata" : "Categoria attiva"}</p>
-              </div>
-              <span class="soft-chip">${category.entry_count} mov.</span>
+    els.categoryGrid.innerHTML = state.categories.map((category) => `
+      <article class="category-card" data-category-id="${category.id}">
+        <div class="category-head">
+          <div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="swatch" style="background:${escapeHtml(category.color)};"></span>
+              <strong>${escapeHtml(category.name)}</strong>
             </div>
-            <div class="category-meta">
-              <div class="meta-pill">Spese: ${escapeHtml(formatMoney(category.expense_total))}</div>
-              <div class="meta-pill">Entrate: ${escapeHtml(formatMoney(category.income_total))}</div>
-            </div>
-            <div class="category-actions">
-              <button class="mini-btn" data-category-action="edit" data-category-id="${category.id}">Modifica</button>
-              <button class="mini-btn" data-category-action="delete" data-category-id="${category.id}">Archivia</button>
-            </div>
-          </article>
-        `;
-      })
-      .join("");
+            <p class="helper">${category.archived ? "Categoria archiviata" : "Categoria attiva"}</p>
+          </div>
+          <span class="soft-chip">${category.entry_count} mov.</span>
+        </div>
+        <div class="category-meta">
+          <div class="meta-pill">Spese: ${escapeHtml(formatMoney(category.expense_total))}</div>
+          <div class="meta-pill">Entrate: ${escapeHtml(formatMoney(category.income_total))}</div>
+        </div>
+        <div class="category-actions">
+          <button class="mini-btn" data-category-action="edit" data-category-id="${category.id}">Modifica</button>
+          <button class="mini-btn" data-category-action="delete" data-category-id="${category.id}">Archivia</button>
+        </div>
+      </article>
+    `).join("");
   }
 
   function renderProfile() {
@@ -397,7 +388,7 @@
     els.profileSavingRate.textContent = state.summary.savings_rate == null ? "-" : `${state.summary.savings_rate}%`;
 
     if (user.picture) {
-      els.profileAvatar.innerHTML = `<img src="${escapeHtml(user.picture)}" alt="${escapeHtml(user.name || "avatar")}" style="width:100%;height:100%;object-fit:cover;border-radius:24px;">`;
+      els.profileAvatar.innerHTML = `<img src="${escapeHtml(user.picture)}" alt="${escapeHtml(user.name || "avatar")}" style="width:100%;height:100%;object-fit:cover;border-radius:22px;">`;
     } else {
       els.profileAvatar.textContent = avatarText(user);
     }
@@ -521,6 +512,7 @@
       }
       window.google.accounts.id.initialize({
         client_id: googleClientId,
+        auto_select: true,
         callback: async (response) => {
           try {
             await api("/auth/google", {
@@ -542,6 +534,7 @@
         text: "continue_with",
         width: 280,
       });
+      window.google.accounts.id.prompt();
     };
     waitForGoogle();
   }
@@ -549,7 +542,7 @@
   function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+      navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(assetVersion)}`, { updateViaCache: "none" }).catch(() => {});
     });
   }
 
@@ -569,9 +562,11 @@
 
     els.closeEntryModal.addEventListener("click", closeEntryModal);
     els.closeCategoryModal.addEventListener("click", closeCategoryModal);
+
     els.entryModal.addEventListener("click", (event) => {
       if (event.target === els.entryModal) closeEntryModal();
     });
+
     els.categoryModal.addEventListener("click", (event) => {
       if (event.target === els.categoryModal) closeCategoryModal();
     });
