@@ -1,21 +1,36 @@
 import csv
+from copy import deepcopy
 import io
 import json
 import mimetypes
 import os
 import re
+import time
+import uuid
+from urllib.parse import urlencode
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 from html import escape
 from threading import Lock
 
-from flask import Flask, Response, g, jsonify, render_template, request, send_file, session
+import requests
+from flask import Flask, Response, g, has_request_context, jsonify, redirect, render_template, request, send_file, session, url_for
 
 try:
     import psycopg
 except Exception:
     psycopg = None
+
+
+def env_int(name, default):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,8 +50,19 @@ PWA_ICON_FILE = os.environ.get("PWA_ICON_FILE", "").strip()
 ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "SM").strip() or "SM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
-SESSION_DAYS = int(os.environ.get("SPESE_MIXET_SESSION_DAYS", "90"))
-ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-18-v4").strip() or "2026-05-18-v4"
+SESSION_DAYS = env_int("SPESE_MIXET_SESSION_DAYS", 90)
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-20-v5").strip() or "2026-05-20-v5"
+STATE_CACHE_TTL = max(0, env_int("SPESE_MIXET_STATE_CACHE_TTL", 12))
+ENABLE_BANKING_BASE_URL = os.environ.get("ENABLE_BANKING_BASE_URL", "https://api.enablebanking.com").strip().rstrip("/")
+ENABLE_BANKING_APP_ID = os.environ.get("ENABLE_BANKING_APP_ID", "").strip()
+ENABLE_BANKING_PRIVATE_KEY = os.environ.get("ENABLE_BANKING_PRIVATE_KEY", "")
+ENABLE_BANKING_PRIVATE_KEY_PATH = os.environ.get("ENABLE_BANKING_PRIVATE_KEY_PATH", "").strip()
+ENABLE_BANKING_COUNTRY = os.environ.get("ENABLE_BANKING_COUNTRY", "IT").strip().upper() or "IT"
+ENABLE_BANKING_ASPSP_NAME = os.environ.get("ENABLE_BANKING_ASPSP_NAME", "").strip()
+ENABLE_BANKING_ASPSP_MATCH = os.environ.get("ENABLE_BANKING_ASPSP_MATCH", "postepay,poste italiane,poste").strip()
+ENABLE_BANKING_CONSENT_DAYS = max(1, min(180, env_int("ENABLE_BANKING_CONSENT_DAYS", 90)))
+ENABLE_BANKING_TX_DAYS = max(7, min(365, env_int("ENABLE_BANKING_TX_DAYS", 90)))
+ENABLE_BANKING_PROVIDER = "enablebanking"
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -50,6 +76,8 @@ DEFAULT_CATEGORY_SEEDS = [
 
 MONEY_STEP = Decimal("0.01")
 lock = Lock()
+state_cache = {}
+aspsp_cache = {}
 
 app = Flask(__name__, template_folder=os.path.join(BASE_DIR, "templates"), static_folder=os.path.join(BASE_DIR, "static"))
 app.secret_key = os.environ.get("SPESE_MIXET_SECRET", "change-me-in-production")
@@ -246,6 +274,58 @@ def format_period_label(start_date, end_date):
     return f"{start_date.strftime('%d/%m/%Y')} - {inclusive_end.strftime('%d/%m/%Y')}"
 
 
+def iso_utc(dt_value=None):
+    dt_value = dt_value or datetime.utcnow()
+    return dt_value.replace(microsecond=0).isoformat() + "Z"
+
+
+def clone_payload(payload):
+    return deepcopy(payload)
+
+
+def state_cache_key(email, month_value, profile_mode, cycle_day):
+    return "|".join(
+        [
+            normalize_email(email),
+            str(month_value or "").strip(),
+            str(profile_mode or "month").strip().lower(),
+            str(clamp_cycle_day(cycle_day)),
+        ]
+    )
+
+
+def get_cached_state(email, month_value, profile_mode, cycle_day):
+    if STATE_CACHE_TTL <= 0:
+        return None
+    key = state_cache_key(email, month_value, profile_mode, cycle_day)
+    item = state_cache.get(key)
+    if not item:
+        return None
+    if (time.time() - float(item.get("timestamp", 0.0))) > STATE_CACHE_TTL:
+        state_cache.pop(key, None)
+        return None
+    return clone_payload(item.get("payload"))
+
+
+def set_cached_state(email, month_value, profile_mode, cycle_day, payload):
+    if STATE_CACHE_TTL <= 0:
+        return
+    state_cache[state_cache_key(email, month_value, profile_mode, cycle_day)] = {
+        "timestamp": time.time(),
+        "payload": clone_payload(payload),
+    }
+
+
+def invalidate_state_cache(email=None):
+    if not email:
+        state_cache.clear()
+        return
+    prefix = f"{normalize_email(email)}|"
+    for key in list(state_cache.keys()):
+        if key.startswith(prefix):
+            state_cache.pop(key, None)
+
+
 def resolve_profile_period(month_value, profile_mode, cycle_day):
     profile_mode = str(profile_mode or "month").strip().lower()
     profile_mode = "cycle" if profile_mode == "cycle" else "month"
@@ -345,6 +425,32 @@ class ExpenseStore:
                     ON expense_entries (user_email, category_id)
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bank_links (
+                        user_email TEXT PRIMARY KEY REFERENCES app_users(email) ON DELETE CASCADE,
+                        provider TEXT NOT NULL DEFAULT 'enablebanking',
+                        aspsp_name TEXT NOT NULL DEFAULT '',
+                        account_uid TEXT NOT NULL DEFAULT '',
+                        account_name TEXT NOT NULL DEFAULT '',
+                        account_iban TEXT NOT NULL DEFAULT '',
+                        account_currency TEXT NOT NULL DEFAULT 'EUR',
+                        session_id TEXT NOT NULL DEFAULT '',
+                        access_valid_until TEXT NOT NULL DEFAULT '',
+                        connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bank_snapshots (
+                        user_email TEXT PRIMARY KEY REFERENCES app_users(email) ON DELETE CASCADE,
+                        snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
 
     def ensure_file_state(self):
         if not os.path.exists(self.data_file):
@@ -355,6 +461,8 @@ class ExpenseStore:
             "users": {},
             "categories": {},
             "entries": {},
+            "bank_links": {},
+            "bank_snapshots": {},
             "next_category_id": 1,
             "next_entry_id": 1,
         }
@@ -369,6 +477,8 @@ class ExpenseStore:
         state["users"] = state.get("users", {}) or {}
         state["categories"] = state.get("categories", {}) or {}
         state["entries"] = state.get("entries", {}) or {}
+        state["bank_links"] = state.get("bank_links", {}) or {}
+        state["bank_snapshots"] = state.get("bank_snapshots", {}) or {}
         state["next_category_id"] = int(state.get("next_category_id", 1) or 1)
         state["next_entry_id"] = int(state.get("next_entry_id", 1) or 1)
         return state
@@ -521,6 +631,202 @@ class ExpenseStore:
             }
         state = self.load_file_state()
         return self.serialize_user(state["users"].get(email))
+
+    def serialize_bank_link(self, item):
+        if not item:
+            return None
+        return {
+            "provider": clean_text(item.get("provider"), ENABLE_BANKING_PROVIDER, 40),
+            "aspsp_name": clean_text(item.get("aspsp_name"), "", 120),
+            "account_uid": str(item.get("account_uid", "") or ""),
+            "account_name": clean_text(item.get("account_name"), "", 120),
+            "account_iban": str(item.get("account_iban", "") or ""),
+            "account_currency": str(item.get("account_currency", "") or "EUR"),
+            "session_id": str(item.get("session_id", "") or ""),
+            "access_valid_until": str(item.get("access_valid_until", "") or ""),
+            "connected_at": str(item.get("connected_at", "") or ""),
+            "updated_at": str(item.get("updated_at", "") or ""),
+        }
+
+    def get_bank_link(self, email):
+        email = normalize_email(email)
+        if not email:
+            return None
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT provider,
+                               aspsp_name,
+                               account_uid,
+                               account_name,
+                               account_iban,
+                               account_currency,
+                               session_id,
+                               access_valid_until,
+                               connected_at,
+                               updated_at
+                        FROM bank_links
+                        WHERE user_email = %s
+                        """,
+                        (email,),
+                    )
+                    row = cur.fetchone()
+            if not row:
+                return None
+            return self.serialize_bank_link(
+                {
+                    "provider": row[0],
+                    "aspsp_name": row[1],
+                    "account_uid": row[2],
+                    "account_name": row[3],
+                    "account_iban": row[4],
+                    "account_currency": row[5],
+                    "session_id": row[6],
+                    "access_valid_until": row[7],
+                    "connected_at": row[8].isoformat(timespec="seconds") if row[8] else "",
+                    "updated_at": row[9].isoformat(timespec="seconds") if row[9] else "",
+                }
+            )
+
+        state = self.load_file_state()
+        return self.serialize_bank_link(state["bank_links"].get(email))
+
+    def save_bank_link(self, email, payload):
+        email = normalize_email(email)
+        item = self.serialize_bank_link(payload) or {}
+        item["connected_at"] = item.get("connected_at") or datetime.now().isoformat(timespec="seconds")
+        item["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO bank_links (
+                            user_email,
+                            provider,
+                            aspsp_name,
+                            account_uid,
+                            account_name,
+                            account_iban,
+                            account_currency,
+                            session_id,
+                            access_valid_until,
+                            connected_at,
+                            updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (user_email) DO UPDATE SET
+                            provider = EXCLUDED.provider,
+                            aspsp_name = EXCLUDED.aspsp_name,
+                            account_uid = EXCLUDED.account_uid,
+                            account_name = EXCLUDED.account_name,
+                            account_iban = EXCLUDED.account_iban,
+                            account_currency = EXCLUDED.account_currency,
+                            session_id = EXCLUDED.session_id,
+                            access_valid_until = EXCLUDED.access_valid_until,
+                            updated_at = NOW()
+                        """,
+                        (
+                            email,
+                            item["provider"],
+                            item["aspsp_name"],
+                            item["account_uid"],
+                            item["account_name"],
+                            item["account_iban"],
+                            item["account_currency"],
+                            item["session_id"],
+                            item["access_valid_until"],
+                        ),
+                    )
+            return self.get_bank_link(email)
+
+        state = self.load_file_state()
+        state["bank_links"][email] = item
+        self.save_file_state(state)
+        return self.serialize_bank_link(item)
+
+    def delete_bank_link(self, email):
+        email = normalize_email(email)
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM bank_links WHERE user_email = %s", (email,))
+            return
+
+        state = self.load_file_state()
+        state["bank_links"].pop(email, None)
+        self.save_file_state(state)
+
+    def get_bank_snapshot(self, email):
+        email = normalize_email(email)
+        if not email:
+            return {}
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT snapshot_json
+                        FROM bank_snapshots
+                        WHERE user_email = %s
+                        """,
+                        (email,),
+                    )
+                    row = cur.fetchone()
+            if not row or not row[0]:
+                return {}
+            if isinstance(row[0], dict):
+                return row[0]
+            if isinstance(row[0], str):
+                try:
+                    return json.loads(row[0])
+                except json.JSONDecodeError:
+                    return {}
+            return {}
+
+        state = self.load_file_state()
+        return state["bank_snapshots"].get(email) or {}
+
+    def save_bank_snapshot(self, email, snapshot):
+        email = normalize_email(email)
+        data = dict(snapshot or {})
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO bank_snapshots (user_email, snapshot_json, updated_at)
+                        VALUES (%s, %s::jsonb, NOW())
+                        ON CONFLICT (user_email) DO UPDATE SET
+                            snapshot_json = EXCLUDED.snapshot_json,
+                            updated_at = NOW()
+                        """,
+                        (email, json.dumps(data, ensure_ascii=False)),
+                    )
+            return data
+
+        state = self.load_file_state()
+        state["bank_snapshots"][email] = data
+        self.save_file_state(state)
+        return data
+
+    def delete_bank_snapshot(self, email):
+        email = normalize_email(email)
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM bank_snapshots WHERE user_email = %s", (email,))
+            return
+
+        state = self.load_file_state()
+        state["bank_snapshots"].pop(email, None)
+        self.save_file_state(state)
+
+    def clear_bank_data(self, email):
+        self.delete_bank_snapshot(email)
+        self.delete_bank_link(email)
 
     def list_categories(self, email, include_archived=True):
         email = normalize_email(email)
@@ -984,6 +1290,9 @@ class ExpenseStore:
 
     def build_state(self, email, selected_month, profile_mode="month", cycle_day=25):
         month_value, start_date, end_date = month_bounds(selected_month)
+        cached = get_cached_state(email, month_value, profile_mode, cycle_day)
+        if cached:
+            return cached
         entries = self.list_entries(email, start_date=start_date, end_date=end_date)
         categories = self.list_categories(email, include_archived=True)
         usage = self.category_usage(email)
@@ -1014,7 +1323,7 @@ class ExpenseStore:
             profile_period["start_date"],
             profile_period["end_date"],
         )
-        return {
+        payload = {
             "month": month_value,
             "month_label": month_label(month_value),
             "storage_mode": "database" if DB_MODE else "file",
@@ -1029,7 +1338,10 @@ class ExpenseStore:
                 "end_date": (profile_period["end_date"] - timedelta(days=1)).isoformat(),
             },
             "profile_summary": profile_summary,
+            "bank": build_bank_state_payload(self.get_bank_link(email), self.get_bank_snapshot(email)),
         }
+        set_cached_state(email, month_value, profile_mode, cycle_day, payload)
+        return payload
 
     def build_month_summary(self, entries, month_value):
         expense_total = 0.0
@@ -1265,13 +1577,489 @@ class ExpenseStore:
 store = ExpenseStore(DATA_FILE)
 
 
+class BankIntegrationError(RuntimeError):
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.status_code = int(status_code)
+
+
+def enable_banking_configured():
+    return bool(ENABLE_BANKING_APP_ID and (ENABLE_BANKING_PRIVATE_KEY.strip() or ENABLE_BANKING_PRIVATE_KEY_PATH))
+
+
+def load_enable_banking_private_key():
+    if ENABLE_BANKING_PRIVATE_KEY.strip():
+        return ENABLE_BANKING_PRIVATE_KEY.replace("\\n", "\n")
+    if ENABLE_BANKING_PRIVATE_KEY_PATH:
+        with open(ENABLE_BANKING_PRIVATE_KEY_PATH, "r", encoding="utf-8") as handle:
+            return handle.read()
+    raise BankIntegrationError("Chiave privata Enable Banking non configurata.", 503)
+
+
+def make_enable_banking_token():
+    if not enable_banking_configured():
+        raise BankIntegrationError("Configura ENABLE_BANKING_APP_ID e la chiave privata di Enable Banking.", 503)
+    try:
+        import jwt as pyjwt
+    except Exception as exc:
+        raise BankIntegrationError(f"Dipendenza JWT mancante ({exc}).", 500) from exc
+
+    issued_at = int(time.time())
+    payload = {
+        "iss": "enablebanking.com",
+        "aud": "api.enablebanking.com",
+        "iat": issued_at,
+        "exp": issued_at + 3600,
+    }
+    return pyjwt.encode(
+        payload,
+        load_enable_banking_private_key(),
+        algorithm="RS256",
+        headers={"kid": ENABLE_BANKING_APP_ID},
+    )
+
+
+def first_non_empty(*values):
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def deep_get(source, *paths):
+    for path in paths:
+        current = source
+        ok = True
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                ok = False
+                break
+            current = current[key]
+        if ok and current not in (None, ""):
+            return current
+    return None
+
+
+def normalize_bank_date(value):
+    text = str(value or "").strip()
+    match = re.match(r"^\d{4}-\d{2}-\d{2}", text)
+    return match.group(0) if match else ""
+
+
+def psu_headers():
+    if not has_request_context():
+        return {}
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    client_ip = (forwarded.split(",")[0].strip() if forwarded else "") or (request.remote_addr or "")
+    headers = {
+        "Psu-Ip-Address": client_ip,
+        "Psu-User-Agent": request.headers.get("User-Agent", ""),
+        "Psu-Referer": request.headers.get("Referer", ""),
+        "Psu-Accept": request.headers.get("Accept", ""),
+        "Psu-Accept-Charset": request.headers.get("Accept-Charset", ""),
+        "Psu-Accept-Encoding": request.headers.get("Accept-Encoding", ""),
+        "Psu-Accept-language": request.headers.get("Accept-Language", ""),
+    }
+    return {key: value for key, value in headers.items() if value}
+
+
+def enable_banking_request(method, path, params=None, json_body=None):
+    url = f"{ENABLE_BANKING_BASE_URL}{path}"
+    headers = {
+        "Authorization": f"Bearer {make_enable_banking_token()}",
+        "Accept": "application/json",
+        **psu_headers(),
+    }
+    if json_body is not None:
+        headers["Content-Type"] = "application/json"
+    try:
+        response = requests.request(method.upper(), url, params=params, json=json_body, headers=headers, timeout=45)
+    except requests.RequestException as exc:
+        raise BankIntegrationError("Connessione al provider Postepay non riuscita.", 503) from exc
+
+    content_type = response.headers.get("content-type", "")
+    data = {}
+    if "application/json" in content_type:
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+    if response.ok:
+        return data
+
+    message = (
+        data.get("message")
+        or data.get("error")
+        or data.get("error_description")
+        or data.get("detail")
+        or "Richiesta bancaria non riuscita."
+    )
+    if response.status_code in {401, 403, 404, 409}:
+        message = f"{message} Ricollega la carta se necessario."
+    raise BankIntegrationError(message, response.status_code)
+
+
+def find_postepay_aspsp(force_refresh=False):
+    cache_key = f"{ENABLE_BANKING_COUNTRY}:{ENABLE_BANKING_ASPSP_NAME}:{ENABLE_BANKING_ASPSP_MATCH}"
+    if not force_refresh and aspsp_cache.get(cache_key):
+        return clone_payload(aspsp_cache[cache_key])
+
+    payload = enable_banking_request("GET", "/aspsps", params={"country": ENABLE_BANKING_COUNTRY})
+    items = payload.get("aspsps") or []
+    if not items:
+        raise BankIntegrationError("Nessun provider bancario trovato per il mercato italiano.", 503)
+
+    if ENABLE_BANKING_ASPSP_NAME:
+        for item in items:
+            if str(item.get("name") or "").strip().lower() == ENABLE_BANKING_ASPSP_NAME.lower():
+                aspsp_cache[cache_key] = clone_payload(item)
+                return clone_payload(item)
+
+    keywords = [keyword.strip().lower() for keyword in ENABLE_BANKING_ASPSP_MATCH.split(",") if keyword.strip()]
+    scored = []
+    for item in items:
+        name = str(item.get("name") or "").strip()
+        lower_name = name.lower()
+        score = 0
+        for index, keyword in enumerate(keywords):
+            if keyword and keyword in lower_name:
+                score = max(score, 100 - index)
+        if score > 0:
+            scored.append((score, name, item))
+    if not scored:
+        raise BankIntegrationError("Postepay non risulta disponibile nel provider configurato.", 503)
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    winner = clone_payload(scored[0][2])
+    aspsp_cache[cache_key] = clone_payload(winner)
+    return winner
+
+
+def bank_account_name(account):
+    return clean_text(
+        first_non_empty(
+            account.get("name"),
+            account.get("product"),
+            account.get("cash_account_type"),
+            account.get("cashAccountType"),
+            "Carta Postepay",
+        ),
+        "Carta Postepay",
+        120,
+    )
+
+
+def bank_account_iban(account):
+    return str(
+        first_non_empty(
+            deep_get(account, ("account_id", "iban")),
+            deep_get(account, ("accountId", "iban")),
+            account.get("iban"),
+            account.get("masked_pan"),
+            account.get("maskedPan"),
+            "",
+        )
+        or ""
+    )
+
+
+def bank_account_currency(account):
+    return str(
+        first_non_empty(
+            account.get("currency"),
+            deep_get(account, ("balance_amount", "currency")),
+            "EUR",
+        )
+        or "EUR"
+    )
+
+
+def choose_postepay_account(accounts):
+    valid_accounts = []
+    for item in accounts or []:
+        account_uid = first_non_empty(item.get("uid"), item.get("account_uid"), item.get("accountId"))
+        if not account_uid:
+            continue
+        valid_accounts.append({**item, "uid": str(account_uid)})
+    if not valid_accounts:
+        return None
+    preferred = [item for item in valid_accounts if "postepay" in bank_account_name(item).lower()]
+    return preferred[0] if preferred else valid_accounts[0]
+
+
+def money_payload_value(payload):
+    if isinstance(payload, dict):
+        return round(money_to_float(payload.get("amount")), 2), str(payload.get("currency") or "EUR")
+    return round(money_to_float(payload), 2), "EUR"
+
+
+def normalize_bank_balances(payload):
+    raw_items = payload.get("balances") or []
+    if not raw_items:
+        return {
+            "currency": "EUR",
+            "current_balance": None,
+            "available_balance": None,
+            "booked_balance": None,
+            "balance_label": "",
+        }
+
+    first_item = raw_items[0]
+    first_amount, first_currency = money_payload_value(first_non_empty(first_item.get("balance_amount"), first_item.get("balanceAmount")))
+    current_balance = round(first_amount, 2)
+    available_balance = None
+    booked_balance = None
+    balance_label = str(first_item.get("name") or first_item.get("balance_type") or "")
+
+    for item in raw_items:
+        amount, currency = money_payload_value(first_non_empty(item.get("balance_amount"), item.get("balanceAmount")))
+        name = str(item.get("name") or "").strip().lower()
+        balance_type = str(item.get("balance_type") or item.get("balanceType") or "").strip().lower()
+        if available_balance is None and ("available" in name or "available" in balance_type):
+            available_balance = round(amount, 2)
+        if booked_balance is None and ("booked" in name or "booked" in balance_type):
+            booked_balance = round(amount, 2)
+        if current_balance is None:
+            current_balance = round(amount, 2)
+            first_currency = currency or first_currency
+
+    if current_balance is None:
+        current_balance = available_balance if available_balance is not None else booked_balance
+
+    return {
+        "currency": first_currency or "EUR",
+        "current_balance": current_balance,
+        "available_balance": available_balance,
+        "booked_balance": booked_balance,
+        "balance_label": balance_label,
+    }
+
+
+def normalize_bank_transactions(payload):
+    items = []
+    for index, raw in enumerate(payload.get("transactions") or [], start=1):
+        amount_node = first_non_empty(raw.get("transaction_amount"), raw.get("transactionAmount"), raw.get("amount"))
+        amount, currency = money_payload_value(amount_node)
+        indicator = str(first_non_empty(raw.get("credit_debit_indicator"), raw.get("creditDebitIndicator"), "") or "").upper()
+        signed_amount = amount
+        if amount > 0 and indicator in {"DBIT", "DEBIT"}:
+            signed_amount = -amount
+        if amount < 0:
+            signed_amount = amount
+
+        title = clean_text(
+            first_non_empty(
+                raw.get("remittance_information_unstructured"),
+                raw.get("remittanceInformationUnstructured"),
+                raw.get("creditor_name"),
+                raw.get("creditorName"),
+                raw.get("debtor_name"),
+                raw.get("debtorName"),
+                raw.get("additional_information"),
+                raw.get("additionalInformation"),
+                raw.get("entry_reference"),
+                raw.get("entryReference"),
+                "Movimento Postepay",
+            ),
+            "Movimento Postepay",
+            120,
+        )
+        party_name = first_non_empty(raw.get("creditor_name"), raw.get("creditorName"), raw.get("debtor_name"), raw.get("debtorName"))
+        reference = first_non_empty(raw.get("entry_reference"), raw.get("entryReference"), raw.get("internal_transaction_id"), raw.get("internalTransactionId"))
+        status = str(raw.get("status") or "")
+        notes = " | ".join(
+            [
+                piece
+                for piece in [
+                    str(party_name or "").strip(),
+                    f"Rif. {reference}" if reference else "",
+                    status,
+                ]
+                if piece
+            ]
+        )
+        items.append(
+            {
+                "id": str(reference or raw.get("transaction_id") or raw.get("transactionId") or index),
+                "date": normalize_bank_date(
+                    first_non_empty(
+                        raw.get("booking_date"),
+                        raw.get("bookingDate"),
+                        raw.get("booked_date"),
+                        raw.get("value_date"),
+                        raw.get("valueDate"),
+                        raw.get("booking_date_time"),
+                        raw.get("bookingDateTime"),
+                        raw.get("transaction_date"),
+                        raw.get("transactionDate"),
+                    )
+                ),
+                "title": title,
+                "notes": notes,
+                "currency": currency or "EUR",
+                "amount": round(abs(signed_amount), 2),
+                "signed_amount": round(signed_amount, 2),
+                "direction": "income" if signed_amount >= 0 else "expense",
+                "status": status,
+            }
+        )
+    items.sort(key=lambda item: (item["date"], item["id"]), reverse=True)
+    return items
+
+
+def build_bank_state_payload(bank_link, bank_snapshot):
+    bank_link = bank_link or {}
+    bank_snapshot = bank_snapshot or {}
+    transactions = bank_snapshot.get("transactions") or []
+    return {
+        "configured": enable_banking_configured(),
+        "provider": bank_link.get("provider") or ENABLE_BANKING_PROVIDER,
+        "connected": bool(bank_link.get("account_uid")),
+        "aspsp_name": bank_link.get("aspsp_name") or "Postepay Evolution",
+        "account_name": bank_snapshot.get("account_name") or bank_link.get("account_name") or "Carta Postepay",
+        "account_iban": bank_snapshot.get("account_iban") or bank_link.get("account_iban") or "",
+        "currency": bank_snapshot.get("currency") or bank_link.get("account_currency") or "EUR",
+        "current_balance": bank_snapshot.get("current_balance"),
+        "available_balance": bank_snapshot.get("available_balance"),
+        "booked_balance": bank_snapshot.get("booked_balance"),
+        "balance_label": bank_snapshot.get("balance_label") or "",
+        "last_sync_at": bank_snapshot.get("synced_at") or "",
+        "transaction_count": int(bank_snapshot.get("transaction_count", len(transactions)) or 0),
+        "transactions": transactions[:12],
+        "access_valid_until": bank_link.get("access_valid_until") or "",
+    }
+
+
+def start_bank_connect_flow(user_email):
+    aspsp = find_postepay_aspsp()
+    flow_state = uuid.uuid4().hex
+    access_valid_until = iso_utc(datetime.utcnow() + timedelta(days=ENABLE_BANKING_CONSENT_DAYS))
+    payload = {
+        "access": {"valid_until": access_valid_until},
+        "aspsp": {
+            "name": aspsp.get("name"),
+            "country": aspsp.get("country") or ENABLE_BANKING_COUNTRY,
+        },
+        "state": flow_state,
+        "redirect_url": request.host_url.rstrip("/") + url_for("auth_enable_banking_callback"),
+        "psu_type": "personal",
+    }
+    response = enable_banking_request("POST", "/auth", json_body=payload)
+    redirect_url = str(first_non_empty(response.get("url"), response.get("redirect_url"), "") or "")
+    if not redirect_url:
+        raise BankIntegrationError("Il provider bancario non ha restituito l'URL di autorizzazione.", 502)
+    session["enable_banking_state"] = flow_state
+    session["enable_banking_user_email"] = normalize_email(user_email)
+    session["enable_banking_aspsp_name"] = str(aspsp.get("name") or "Postepay Evolution")
+    session["enable_banking_access_valid_until"] = access_valid_until
+    return {"redirect_url": redirect_url, "aspsp_name": session["enable_banking_aspsp_name"]}
+
+
+def sync_bank_snapshot(email):
+    if not enable_banking_configured():
+        raise BankIntegrationError("Configura Enable Banking prima di collegare Postepay.", 503)
+    bank_link = store.get_bank_link(email)
+    if not bank_link or not bank_link.get("account_uid"):
+        raise BankIntegrationError("Collega prima la tua Postepay Evolution.", 400)
+
+    account_uid = bank_link["account_uid"]
+    balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/balances")
+    date_from = (date.today() - timedelta(days=ENABLE_BANKING_TX_DAYS)).isoformat()
+    base_params = {
+        "date_from": date_from,
+        "date_to": date.today().isoformat(),
+    }
+    raw_transactions = []
+    continuation_key = None
+    for _ in range(24):
+        params = dict(base_params)
+        if continuation_key:
+            params["continuation_key"] = continuation_key
+        page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
+        raw_transactions.extend(page.get("transactions") or [])
+        continuation_key = page.get("continuation_key")
+        if not continuation_key:
+            break
+
+    balances = normalize_bank_balances(balances_payload)
+    transactions = normalize_bank_transactions({"transactions": raw_transactions})
+    snapshot = {
+        "account_name": bank_link.get("account_name") or "Carta Postepay",
+        "account_iban": bank_link.get("account_iban") or "",
+        "currency": balances.get("currency") or bank_link.get("account_currency") or "EUR",
+        "current_balance": balances.get("current_balance"),
+        "available_balance": balances.get("available_balance"),
+        "booked_balance": balances.get("booked_balance"),
+        "balance_label": balances.get("balance_label") or "",
+        "transaction_count": len(transactions),
+        "transactions": transactions[:60],
+        "synced_at": datetime.now().isoformat(timespec="seconds"),
+        "date_from": date_from,
+        "date_to": date.today().isoformat(),
+    }
+    with lock:
+        store.save_bank_snapshot(email, snapshot)
+    invalidate_state_cache(email)
+    return build_bank_state_payload(store.get_bank_link(email), snapshot)
+
+
+def clear_bank_flow_session():
+    for key in [
+        "enable_banking_state",
+        "enable_banking_user_email",
+        "enable_banking_aspsp_name",
+        "enable_banking_access_valid_until",
+    ]:
+        session.pop(key, None)
+
+
+def bank_redirect_response(status, message=""):
+    query = {"bank_status": status}
+    if message:
+        query["bank_message"] = str(message)
+    return redirect(f"{url_for('index')}?{urlencode(query)}")
+
+
+def session_user_payload(user):
+    if not user:
+        return None
+    return {
+        "email": normalize_email(user.get("email")),
+        "name": clean_text(user.get("name"), normalize_email(user.get("email")), 80),
+        "picture": str(user.get("picture") or ""),
+        "created_at": str(user.get("created_at") or ""),
+        "last_login": str(user.get("last_login") or ""),
+    }
+
+
+def set_session_user(user):
+    payload = session_user_payload(user)
+    if not payload:
+        return
+    session["user_email"] = payload["email"]
+    session["user_name"] = payload["name"]
+    session["user_picture"] = payload["picture"]
+    session["user_created_at"] = payload["created_at"]
+    session["user_last_login"] = payload["last_login"]
+    session.permanent = True
+
+
 def get_user_from_session():
     email = normalize_email(session.get("user_email"))
     if not email:
         return None
+    if session.get("user_name") is not None:
+        return {
+            "email": email,
+            "name": clean_text(session.get("user_name"), email, 80),
+            "picture": str(session.get("user_picture") or ""),
+            "created_at": str(session.get("user_created_at") or ""),
+            "last_login": str(session.get("user_last_login") or ""),
+        }
     user = store.get_user(email)
     if not user:
-        session.pop("user_email", None)
+        session.clear()
+        return None
+    set_session_user(user)
     return user
 
 
@@ -1475,8 +2263,7 @@ def auth_google():
     picture = str(info.get("picture") or "")
     with lock:
         user = store.ensure_user(email, name, picture)
-    session["user_email"] = email
-    session.permanent = True
+    set_session_user(user)
     return jsonify({"ok": True, "user": user})
 
 
@@ -1491,8 +2278,7 @@ def auth_dev_login():
         return jsonify({"ok": False, "message": "Email obbligatoria."}), 400
     with lock:
         user = store.ensure_user(email, name, "")
-    session["user_email"] = email
-    session.permanent = True
+    set_session_user(user)
     return jsonify({"ok": True, "user": user})
 
 
@@ -1500,6 +2286,88 @@ def auth_dev_login():
 def auth_logout():
     session.clear()
     return jsonify({"ok": True})
+
+
+@app.post("/api/bank/connect")
+@login_required
+def api_bank_connect():
+    try:
+        payload = start_bank_connect_flow(g.current_user["email"])
+    except BankIntegrationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), exc.status_code
+    return jsonify({"ok": True, **payload, "message": "Reindirizzamento verso l'autorizzazione Postepay."})
+
+
+@app.get("/auth/enable-banking/callback")
+def auth_enable_banking_callback():
+    expected_state = str(session.get("enable_banking_state") or "")
+    current_state = str(request.args.get("state") or "")
+    user_email = normalize_email(session.get("enable_banking_user_email") or session.get("user_email"))
+    if not expected_state or not user_email:
+        clear_bank_flow_session()
+        return bank_redirect_response("error", "Sessione bancaria scaduta. Riprova il collegamento.")
+    if current_state != expected_state:
+        clear_bank_flow_session()
+        return bank_redirect_response("error", "Stato di autorizzazione non valido.")
+    if request.args.get("error"):
+        message = request.args.get("error_description") or request.args.get("error") or "Autorizzazione annullata."
+        clear_bank_flow_session()
+        return bank_redirect_response("error", message)
+
+    code = str(request.args.get("code") or "").strip()
+    if not code:
+        clear_bank_flow_session()
+        return bank_redirect_response("error", "Codice di autorizzazione mancante.")
+
+    aspsp_name = str(session.get("enable_banking_aspsp_name") or "Postepay Evolution")
+    access_valid_until = str(session.get("enable_banking_access_valid_until") or "")
+
+    try:
+        session_data = enable_banking_request("POST", "/sessions", json_body={"code": code})
+        account = choose_postepay_account(session_data.get("accounts") or [])
+        if not account:
+            raise BankIntegrationError("Nessun conto Postepay disponibile da collegare.", 400)
+        bank_link = {
+            "provider": ENABLE_BANKING_PROVIDER,
+            "aspsp_name": aspsp_name,
+            "account_uid": str(account.get("uid") or ""),
+            "account_name": bank_account_name(account),
+            "account_iban": bank_account_iban(account),
+            "account_currency": bank_account_currency(account),
+            "session_id": str(session_data.get("uid") or session_data.get("session_id") or ""),
+            "access_valid_until": access_valid_until,
+        }
+        with lock:
+            store.save_bank_link(user_email, bank_link)
+        sync_bank_snapshot(user_email)
+    except BankIntegrationError as exc:
+        clear_bank_flow_session()
+        invalidate_state_cache(user_email)
+        return bank_redirect_response("error", str(exc))
+
+    clear_bank_flow_session()
+    invalidate_state_cache(user_email)
+    return bank_redirect_response("connected", "Postepay collegata con successo.")
+
+
+@app.post("/api/bank/sync")
+@login_required
+def api_bank_sync():
+    try:
+        bank_payload = sync_bank_snapshot(g.current_user["email"])
+    except BankIntegrationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), exc.status_code
+    return jsonify({"ok": True, "bank": bank_payload, "message": "Saldo e movimenti Postepay aggiornati."})
+
+
+@app.post("/api/bank/disconnect")
+@login_required
+def api_bank_disconnect():
+    with lock:
+        store.clear_bank_data(g.current_user["email"])
+    invalidate_state_cache(g.current_user["email"])
+    clear_bank_flow_session()
+    return jsonify({"ok": True, "message": "Collegamento Postepay rimosso."})
 
 
 @app.get("/api/state")
@@ -1525,6 +2393,7 @@ def api_create_category():
             category = store.save_category(g.current_user["email"], payload, category_id=None)
     except ValueError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, "category": category, "message": "Categoria creata."})
 
 
@@ -1539,6 +2408,7 @@ def api_update_category(category_id):
         return jsonify({"ok": False, "message": str(exc)}), 400
     except KeyError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 404
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, "category": category, "message": "Categoria aggiornata."})
 
 
@@ -1550,6 +2420,7 @@ def api_delete_category(category_id):
             result = store.delete_category(g.current_user["email"], category_id)
     except KeyError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 404
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, **result})
 
 
@@ -1562,6 +2433,7 @@ def api_create_entry():
             entry = store.save_entry(g.current_user["email"], payload, entry_id=None)
     except ValueError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, "entry": entry, "message": "Movimento salvato."})
 
 
@@ -1576,6 +2448,7 @@ def api_update_entry(entry_id):
         return jsonify({"ok": False, "message": str(exc)}), 400
     except KeyError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 404
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, "entry": entry, "message": "Movimento aggiornato."})
 
 
@@ -1587,6 +2460,7 @@ def api_delete_entry(entry_id):
             store.delete_entry(g.current_user["email"], entry_id)
     except KeyError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 404
+    invalidate_state_cache(g.current_user["email"])
     return jsonify({"ok": True, "message": "Movimento eliminato."})
 
 

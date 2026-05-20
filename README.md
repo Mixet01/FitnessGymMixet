@@ -41,6 +41,8 @@ PWA per tracciare spese ed entrate con:
    $env:PWA_ICON_FILE="pwa-icon.png"
    $env:PWA_PORT="8010"
    $env:SPESE_MIXET_SESSION_DAYS="90"
+   $env:ENABLE_BANKING_APP_ID="UUID_APP_ENABLE_BANKING"
+   $env:ENABLE_BANKING_PRIVATE_KEY_PATH="C:\percorso\alla\chiave.pem"
    ```
 
 3. Avvia il server:
@@ -157,11 +159,37 @@ Se non trova nessun file, usa l'icona SVG generata di default.
 
 Il collegamento automatico con saldo e movimenti Postepay non passa da scraping o login diretto nel sito Poste. La strada corretta e conforme e usare un provider Open Banking / PSD2 autorizzato.
 
-In pratica servono:
+Questa app usa il flusso ufficiale di `Enable Banking` come aggregatore PSD2:
 
-- un provider AISP/TPP o un aggregatore che supporti Postepay
-- credenziali/API key del provider
-- eventuale onboarding contrattuale e redirect OAuth/SCA
+1. crea o attiva un'app in Enable Banking
+2. scarica la chiave privata `.pem`
+3. whitelista l'URL di callback dell'app, ad esempio:
+
+   - `http://127.0.0.1:8010/auth/enable-banking/callback`
+   - `http://localhost:8010/auth/enable-banking/callback`
+
+4. configura almeno queste variabili:
+
+   ```powershell
+   $env:ENABLE_BANKING_APP_ID="UUID_APP_ENABLE_BANKING"
+   $env:ENABLE_BANKING_PRIVATE_KEY_PATH="C:\percorso\alla\chiave.pem"
+   ```
+
+Opzionali:
+
+```powershell
+$env:ENABLE_BANKING_BASE_URL="https://api.enablebanking.com"
+$env:ENABLE_BANKING_COUNTRY="IT"
+$env:ENABLE_BANKING_ASPSP_MATCH="postepay,poste italiane,poste"
+$env:ENABLE_BANKING_CONSENT_DAYS="90"
+$env:ENABLE_BANKING_TX_DAYS="90"
+```
+
+Nell'app trovi poi:
+
+- `Collega Postepay` per aprire il consenso PSD2
+- `Aggiorna saldo` per scaricare saldo e movimenti recenti
+- `Scollega` per rimuovere il collegamento e la cache bancaria locale
 
 Fonti ufficiali utili:
 
