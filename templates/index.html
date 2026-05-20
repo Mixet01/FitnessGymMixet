@@ -23,7 +23,15 @@
   data-pwa-app-name="{{ pwa_app_name }}"
   data-asset-version="{{ asset_version }}"
 >
-  <section id="auth-gate" class="gate">
+  <section id="boot-splash" class="boot-splash">
+    <article class="boot-card">
+      <p class="eyebrow">Spese Mixet</p>
+      <h1>Sto preparando la tua area personale.</h1>
+      <p class="helper">Controllo accesso, categorie e ultimi dati salvati.</p>
+    </article>
+  </section>
+
+  <section id="auth-gate" class="gate hidden">
     <article class="hero-panel">
       <p class="eyebrow">PWA personale</p>
       <h1>Gestisci spese e saldo con lo stesso feeling dell'altra app.</h1>
@@ -233,6 +241,42 @@
               </div>
             </div>
             <div id="profile-breakdown" class="stack-list"></div>
+          </div>
+
+          <div class="panel inset-panel bank-panel">
+            <div class="panel-head blocky compact">
+              <div>
+                <h3>Postepay Evolution</h3>
+                <p id="bank-status-text" class="helper">Collega la carta per vedere saldo e movimenti.</p>
+              </div>
+              <span id="bank-sync-chip" class="soft-chip">Non collegata</span>
+            </div>
+
+            <div class="profile-stats bank-stats">
+              <div class="profile-stat">
+                <span class="mini-label">Saldo attuale</span>
+                <strong id="bank-balance">EUR 0,00</strong>
+              </div>
+              <div class="profile-stat">
+                <span class="mini-label">Conto collegato</span>
+                <strong id="bank-account-name">Nessun collegamento</strong>
+              </div>
+            </div>
+
+            <div class="bank-meta">
+              <div id="bank-iban" class="meta-pill">IBAN o PAN non disponibile</div>
+              <div id="bank-valid-until" class="meta-pill">Accesso non attivo</div>
+            </div>
+
+            <p id="bank-message" class="helper"></p>
+
+            <div class="profile-actions">
+              <button id="bank-connect" class="btn primary">Collega Postepay</button>
+              <button id="bank-sync" class="btn secondary">Aggiorna saldo</button>
+              <button id="bank-disconnect" class="btn danger">Scollega</button>
+            </div>
+
+            <div id="bank-transaction-list" class="stack-list"></div>
           </div>
 
           <div class="profile-actions">
