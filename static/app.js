@@ -44,10 +44,30 @@
     search: "",
     editingEntryId: null,
     editingCategoryId: null,
+    bank: {
+      configured: false,
+      connected: false,
+      aspsp_name: "Postepay Evolution",
+      account_name: "",
+      account_iban: "",
+      currency: "EUR",
+      current_balance: null,
+      available_balance: null,
+      booked_balance: null,
+      balance_label: "",
+      last_sync_at: "",
+      transaction_count: 0,
+      transactions: [],
+      access_valid_until: "",
+    },
+    bankFlash: null,
+    lastStateFetchAt: 0,
+    refreshPromise: null,
   };
 
   const els = {
     body: document.body,
+    bootSplash: document.getElementById("boot-splash"),
     authGate: document.getElementById("auth-gate"),
     appShell: document.getElementById("app-shell"),
     googleSignin: document.getElementById("google-signin"),
@@ -96,6 +116,17 @@
     profileDays: document.getElementById("profile-days"),
     profileSavingRate: document.getElementById("profile-saving-rate"),
     profileBreakdown: document.getElementById("profile-breakdown"),
+    bankStatusText: document.getElementById("bank-status-text"),
+    bankSyncChip: document.getElementById("bank-sync-chip"),
+    bankBalance: document.getElementById("bank-balance"),
+    bankAccountName: document.getElementById("bank-account-name"),
+    bankIban: document.getElementById("bank-iban"),
+    bankValidUntil: document.getElementById("bank-valid-until"),
+    bankMessage: document.getElementById("bank-message"),
+    bankConnect: document.getElementById("bank-connect"),
+    bankSync: document.getElementById("bank-sync"),
+    bankDisconnect: document.getElementById("bank-disconnect"),
+    bankTransactionList: document.getElementById("bank-transaction-list"),
     entryModal: document.getElementById("entry-modal"),
     entryModalTitle: document.getElementById("entry-modal-title"),
     closeEntryModal: document.getElementById("close-entry-modal"),
@@ -119,10 +150,12 @@
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
   const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
-  const assetVersion = (els.body.dataset.assetVersion || "2026-05-18-v4").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-20-v5").trim();
   const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
   const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
   const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
+  const dateTimeFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  let googleInitialized = false;
 
   function escapeHtml(value) {
     return String(value || "")
@@ -143,6 +176,19 @@
     return shortDateFormatter.format(dateObj).replace(".", "");
   }
 
+  function formatDateTime(value) {
+    if (!value) return "-";
+    const normalized = String(value).includes("T") ? String(value).replace(" ", "T") : `${value}T00:00:00`;
+    const dateObj = new Date(normalized);
+    if (Number.isNaN(dateObj.getTime())) return String(value);
+    return dateTimeFormatter.format(dateObj);
+  }
+
+  function formatAccessDate(value) {
+    if (!value) return "Accesso non attivo";
+    return `Accesso valido fino al ${formatDateTime(value)}`;
+  }
+
   function avatarText(user) {
     const base = String((user && (user.name || user.email)) || appName).trim();
     return base.slice(0, 2).toUpperCase();
@@ -156,6 +202,11 @@
       data = await response.json();
     }
     if (!response.ok) {
+      if (response.status === 401) {
+        state.me = null;
+        showGate("auth");
+        initGoogleSignIn();
+      }
       throw new Error((data && data.message) || "Operazione non riuscita.");
     }
     return data;
@@ -166,10 +217,27 @@
     els.appShell.classList.toggle("hidden", mode !== "app");
   }
 
+  function hideBootSplash() {
+    els.bootSplash.classList.add("hidden");
+  }
+
   function setActiveScreen(screenId) {
     state.activeScreen = screenId;
     els.screens.forEach((screen) => screen.classList.toggle("active", screen.id === screenId));
     els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.screen === screenId));
+  }
+
+  function consumeBankFlashFromUrl() {
+    const url = new URL(window.location.href);
+    const status = (url.searchParams.get("bank_status") || "").trim();
+    const message = (url.searchParams.get("bank_message") || "").trim();
+    if (!status && !message) return;
+    state.bankFlash = { status: status || "info", message };
+    setActiveScreen("screen-profile");
+    url.searchParams.delete("bank_status");
+    url.searchParams.delete("bank_message");
+    const cleanUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}${url.hash || ""}`;
+    window.history.replaceState({}, "", cleanUrl);
   }
 
   function setMonthValue(monthValue) {
@@ -369,6 +437,75 @@
     `).join("");
   }
 
+  function bankTransactionMarkup(item) {
+    const amountClass = item.direction === "income" ? "income" : "expense";
+    const dotColor = item.direction === "income" ? "#27e89d" : "#ff4d7a";
+    const amountPrefix = item.direction === "income" ? "+" : "-";
+    return `
+      <article class="movement-row">
+        <span class="dot" style="background:${dotColor};"></span>
+        <div class="movement-copy">
+          <strong>${escapeHtml(item.title || "Movimento Postepay")}</strong>
+          <p>${escapeHtml(formatShortDate(item.date || ""))}${item.status ? ` - ${escapeHtml(item.status)}` : ""}</p>
+          ${item.notes ? `<p>${escapeHtml(item.notes)}</p>` : ""}
+        </div>
+        <div class="movement-amount">
+          <strong class="${amountClass}">${escapeHtml(`${amountPrefix}${formatMoney(item.amount || 0)}`)}</strong>
+          <small>${escapeHtml(item.currency || "EUR")}</small>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderBank() {
+    const bank = state.bank || {};
+    const hasBalance = bank.current_balance != null || bank.available_balance != null || bank.booked_balance != null;
+    const visibleBalance = bank.current_balance ?? bank.available_balance ?? bank.booked_balance;
+    const balanceLabel = bank.balance_label ? `Saldo ${bank.balance_label.toLowerCase()}` : "Saldo attuale";
+    const flashMessage = state.bankFlash && state.bankFlash.message ? state.bankFlash.message : "";
+
+    els.bankBalance.textContent = hasBalance ? formatMoney(visibleBalance) : "-";
+    els.bankAccountName.textContent = bank.connected ? (bank.account_name || "Carta Postepay") : "Nessun collegamento";
+    els.bankIban.textContent = bank.account_iban || "IBAN o PAN non disponibile";
+    els.bankValidUntil.textContent = formatAccessDate(bank.access_valid_until);
+    els.bankMessage.textContent = flashMessage || "";
+
+    if (!bank.configured) {
+      els.bankStatusText.textContent = "Manca la configurazione del provider PSD2 per collegare davvero la Postepay.";
+      els.bankSyncChip.textContent = "Non configurato";
+      els.bankBalance.previousElementSibling.textContent = "Saldo attuale";
+      els.bankTransactionList.innerHTML = "<div class='empty-state'>Configura Enable Banking nel server per attivare saldo e movimenti live.</div>";
+      els.bankConnect.disabled = true;
+      els.bankSync.disabled = true;
+      els.bankDisconnect.disabled = true;
+      return;
+    }
+
+    els.bankBalance.previousElementSibling.textContent = balanceLabel;
+    els.bankConnect.disabled = false;
+    els.bankSync.disabled = !bank.connected;
+    els.bankDisconnect.disabled = !bank.connected;
+
+    if (!bank.connected) {
+      els.bankStatusText.textContent = "Carta non ancora collegata. Il collegamento usa il consenso ufficiale PSD2.";
+      els.bankSyncChip.textContent = "Da collegare";
+      els.bankTransactionList.innerHTML = "<div class='empty-state'>Collega la tua Postepay Evolution per scaricare saldo e movimenti.</div>";
+      return;
+    }
+
+    els.bankStatusText.textContent = bank.last_sync_at
+      ? `Saldo e movimenti aggiornati al ${formatDateTime(bank.last_sync_at)}.`
+      : "Carta collegata. Puoi aggiornare saldo e movimenti quando vuoi.";
+    els.bankSyncChip.textContent = bank.last_sync_at ? "Sincronizzata" : "Collegata";
+
+    if (!(bank.transactions || []).length) {
+      els.bankTransactionList.innerHTML = "<div class='empty-state'>Nessun movimento scaricato. Premi Aggiorna saldo per sincronizzare i dati.</div>";
+      return;
+    }
+
+    els.bankTransactionList.innerHTML = (bank.transactions || []).slice(0, 8).map(bankTransactionMarkup).join("");
+  }
+
   function renderProfile() {
     const user = state.me || {};
     const summary = state.profileSummary || {};
@@ -389,6 +526,7 @@
       button.classList.toggle("active", button.dataset.profileMode === state.profileMode);
     });
     renderProfileBreakdown();
+    renderBank();
 
     if (user.picture) {
       els.profileAvatar.innerHTML = `<img src="${escapeHtml(user.picture)}" alt="${escapeHtml(user.name || "avatar")}" style="width:100%;height:100%;object-fit:cover;border-radius:22px;">`;
@@ -428,22 +566,33 @@
     els.welcomeName.textContent = `Ciao, ${state.me.name || "utente"}`;
   }
 
-  async function refreshState() {
-    const params = new URLSearchParams({
-      month: state.month,
-      profile_mode: state.profileMode,
-      cycle_day: String(state.profileCycleDay),
-    });
-    const data = await api(`/api/state?${params.toString()}`);
-    state.month = data.month;
-    state.monthLabel = data.month_label;
-    state.storageMode = data.storage_mode;
-    state.categories = data.categories || [];
-    state.entries = data.entries || [];
-    state.summary = data.summary || state.summary;
-    state.profilePeriod = data.profile_period || state.profilePeriod;
-    state.profileSummary = data.profile_summary || state.profileSummary;
-    renderApp();
+  async function refreshState(options = {}) {
+    if (state.refreshPromise) return state.refreshPromise;
+    const run = (async () => {
+      const params = new URLSearchParams({
+        month: state.month,
+        profile_mode: state.profileMode,
+        cycle_day: String(state.profileCycleDay),
+      });
+      const data = await api(`/api/state?${params.toString()}`);
+      state.month = data.month;
+      state.monthLabel = data.month_label;
+      state.storageMode = data.storage_mode;
+      state.categories = data.categories || [];
+      state.entries = data.entries || [];
+      state.summary = data.summary || state.summary;
+      state.profilePeriod = data.profile_period || state.profilePeriod;
+      state.profileSummary = data.profile_summary || state.profileSummary;
+      state.bank = data.bank || state.bank;
+      state.lastStateFetchAt = Date.now();
+      renderApp();
+    })();
+    state.refreshPromise = run;
+    try {
+      await run;
+    } finally {
+      state.refreshPromise = null;
+    }
   }
 
   async function saveEntry() {
@@ -511,22 +660,46 @@
     await refreshState();
   }
 
+  async function connectBank() {
+    const data = await api("/api/bank/connect", { method: "POST" });
+    if (!data.redirect_url) {
+      throw new Error("Il provider non ha restituito un URL di collegamento.");
+    }
+    window.location.assign(data.redirect_url);
+  }
+
+  async function syncBank() {
+    const data = await api("/api/bank/sync", { method: "POST" });
+    state.bankFlash = { status: "success", message: data.message || "Saldo Postepay aggiornato." };
+    await refreshState();
+  }
+
+  async function disconnectBank() {
+    if (!window.confirm("Scollegare Postepay e rimuovere saldo e movimenti sincronizzati?")) return;
+    const data = await api("/api/bank/disconnect", { method: "POST" });
+    state.bankFlash = { status: "info", message: data.message || "Collegamento rimosso." };
+    await refreshState();
+  }
+
   async function logout() {
     if (window.google && window.google.accounts && window.google.accounts.id) {
       window.google.accounts.id.disableAutoSelect();
     }
     await api("/auth/logout", { method: "POST" });
     state.me = null;
+    state.bankFlash = null;
     showGate("auth");
+    initGoogleSignIn();
   }
 
   function initGoogleSignIn() {
-    if (!googleClientId || !els.googleSignin) return;
+    if (!googleClientId || !els.googleSignin || googleInitialized) return;
     const waitForGoogle = () => {
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
         window.setTimeout(waitForGoogle, 200);
         return;
       }
+      googleInitialized = true;
       window.google.accounts.id.initialize({
         client_id: googleClientId,
         auto_select: true,
@@ -539,6 +712,7 @@
             });
             await refreshMe();
             await refreshState();
+            hideBootSplash();
           } catch (err) {
             alert(err.message);
           }
@@ -674,6 +848,18 @@
       logout().catch((err) => alert(err.message));
     });
 
+    els.bankConnect.addEventListener("click", () => {
+      connectBank().catch((err) => alert(err.message));
+    });
+
+    els.bankSync.addEventListener("click", () => {
+      syncBank().catch((err) => alert(err.message));
+    });
+
+    els.bankDisconnect.addEventListener("click", () => {
+      disconnectBank().catch((err) => alert(err.message));
+    });
+
     if (els.devLogin) {
       els.devLogin.addEventListener("click", async () => {
         try {
@@ -694,7 +880,7 @@
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && state.me) {
+      if (!document.hidden && state.me && (Date.now() - state.lastStateFetchAt) > 45000) {
         refreshState().catch(() => {});
       }
     });
@@ -703,17 +889,21 @@
   async function boot() {
     document.title = appName;
     setMonthValue(els.body.dataset.month || new Date().toISOString().slice(0, 7));
+    consumeBankFlashFromUrl();
     bindEvents();
-    initGoogleSignIn();
     registerServiceWorker();
 
     try {
       await refreshMe();
       if (state.me) {
         await refreshState();
+      } else {
+        initGoogleSignIn();
       }
     } catch (err) {
       alert(err.message);
+    } finally {
+      hideBootSplash();
     }
   }
 

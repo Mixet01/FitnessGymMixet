@@ -127,6 +127,33 @@ p {
   align-items: stretch;
 }
 
+.boot-splash {
+  min-height: 100vh;
+  padding: 28px 18px 120px;
+  display: grid;
+  place-items: center;
+}
+
+.boot-card {
+  width: min(520px, 100%);
+  padding: 28px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(14, 28, 51, 0.94) 0%, rgba(10, 21, 40, 0.94) 100%);
+  box-shadow: var(--shadow-2);
+}
+
+.boot-card h1 {
+  margin-top: 10px;
+  font-size: clamp(32px, 5vw, 52px);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+}
+
+.boot-card .helper {
+  margin-top: 12px;
+}
+
 .hero-panel,
 .login-panel,
 .panel,
@@ -267,6 +294,13 @@ textarea:focus {
   font-weight: 700;
   letter-spacing: 0.01em;
   transition: transform 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none;
 }
 
 .btn:hover,
@@ -744,6 +778,29 @@ textarea:focus {
 
 .profile-actions {
   margin-top: 18px;
+}
+
+.bank-panel .profile-actions {
+  margin-top: 14px;
+}
+
+.bank-stats {
+  margin-top: 0;
+}
+
+.bank-meta {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#bank-message {
+  min-height: 22px;
+  margin-top: 14px;
+}
+
+#bank-transaction-list {
+  margin-top: 16px;
 }
 
 .compact-row {
