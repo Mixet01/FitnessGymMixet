@@ -51,7 +51,7 @@ ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "SM").strip() or "SM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
 SESSION_DAYS = env_int("SPESE_MIXET_SESSION_DAYS", 90)
-ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-20-v5").strip() or "2026-05-20-v5"
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-23-v6").strip() or "2026-05-23-v6"
 STATE_CACHE_TTL = max(0, env_int("SPESE_MIXET_STATE_CACHE_TTL", 12))
 ENABLE_BANKING_BASE_URL = os.environ.get("ENABLE_BANKING_BASE_URL", "https://api.enablebanking.com").strip().rstrip("/")
 ENABLE_BANKING_APP_ID = os.environ.get("ENABLE_BANKING_APP_ID", "").strip()
@@ -63,6 +63,7 @@ ENABLE_BANKING_ASPSP_MATCH = os.environ.get("ENABLE_BANKING_ASPSP_MATCH", "poste
 ENABLE_BANKING_CONSENT_DAYS = max(1, min(180, env_int("ENABLE_BANKING_CONSENT_DAYS", 90)))
 ENABLE_BANKING_TX_DAYS = max(7, min(365, env_int("ENABLE_BANKING_TX_DAYS", 90)))
 ENABLE_BANKING_PROVIDER = "enablebanking"
+BANK_AUTO_SYNC_MINUTES = max(5, min(720, env_int("BANK_AUTO_SYNC_MINUTES", 30)))
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -425,6 +426,16 @@ class ExpenseStore:
                     ON expense_entries (user_email, category_id)
                     """
                 )
+                cur.execute("ALTER TABLE expense_entries ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'")
+                cur.execute("ALTER TABLE expense_entries ADD COLUMN IF NOT EXISTS external_id TEXT NOT NULL DEFAULT ''")
+                cur.execute("ALTER TABLE expense_entries ADD COLUMN IF NOT EXISTS imported_at TIMESTAMPTZ NULL")
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_entries_user_source_external
+                    ON expense_entries (user_email, source, external_id)
+                    WHERE external_id <> ''
+                    """
+                )
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS bank_links (
@@ -451,6 +462,18 @@ class ExpenseStore:
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bank_auth_flows (
+                        state TEXT PRIMARY KEY,
+                        user_email TEXT NOT NULL REFERENCES app_users(email) ON DELETE CASCADE,
+                        aspsp_name TEXT NOT NULL DEFAULT '',
+                        access_valid_until TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
 
     def ensure_file_state(self):
         if not os.path.exists(self.data_file):
@@ -463,6 +486,7 @@ class ExpenseStore:
             "entries": {},
             "bank_links": {},
             "bank_snapshots": {},
+            "bank_auth_flows": {},
             "next_category_id": 1,
             "next_entry_id": 1,
         }
@@ -479,6 +503,7 @@ class ExpenseStore:
         state["entries"] = state.get("entries", {}) or {}
         state["bank_links"] = state.get("bank_links", {}) or {}
         state["bank_snapshots"] = state.get("bank_snapshots", {}) or {}
+        state["bank_auth_flows"] = state.get("bank_auth_flows", {}) or {}
         state["next_category_id"] = int(state.get("next_category_id", 1) or 1)
         state["next_entry_id"] = int(state.get("next_entry_id", 1) or 1)
         return state
@@ -530,6 +555,10 @@ class ExpenseStore:
             "occurred_on": str(entry.get("occurred_on") or ""),
             "created_at": str(entry.get("created_at") or ""),
             "updated_at": str(entry.get("updated_at") or ""),
+            "source": str(entry.get("source") or "manual"),
+            "external_id": str(entry.get("external_id") or ""),
+            "imported": str(entry.get("source") or "manual") != "manual",
+            "needs_category": str(entry.get("source") or "manual") != "manual" and category is None,
             "category": category,
         }
 
@@ -828,6 +857,83 @@ class ExpenseStore:
         self.delete_bank_snapshot(email)
         self.delete_bank_link(email)
 
+    def save_bank_auth_flow(self, flow_state, payload):
+        flow_state = str(flow_state or "").strip()
+        if not flow_state:
+            raise ValueError("State bancario mancante.")
+        item = {
+            "state": flow_state,
+            "user_email": normalize_email(payload.get("user_email")),
+            "aspsp_name": clean_text(payload.get("aspsp_name"), "", 120),
+            "access_valid_until": str(payload.get("access_valid_until", "") or ""),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO bank_auth_flows (state, user_email, aspsp_name, access_valid_until, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW(), NOW())
+                        ON CONFLICT (state) DO UPDATE SET
+                            user_email = EXCLUDED.user_email,
+                            aspsp_name = EXCLUDED.aspsp_name,
+                            access_valid_until = EXCLUDED.access_valid_until,
+                            updated_at = NOW()
+                        """,
+                        (flow_state, item["user_email"], item["aspsp_name"], item["access_valid_until"]),
+                    )
+            return item
+
+        state = self.load_file_state()
+        state["bank_auth_flows"][flow_state] = item
+        self.save_file_state(state)
+        return item
+
+    def get_bank_auth_flow(self, flow_state):
+        flow_state = str(flow_state or "").strip()
+        if not flow_state:
+            return None
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT state, user_email, aspsp_name, access_valid_until, created_at, updated_at
+                        FROM bank_auth_flows
+                        WHERE state = %s
+                        """,
+                        (flow_state,),
+                    )
+                    row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "state": row[0],
+                "user_email": row[1],
+                "aspsp_name": row[2],
+                "access_valid_until": row[3],
+                "created_at": row[4].isoformat(timespec="seconds") if row[4] else "",
+                "updated_at": row[5].isoformat(timespec="seconds") if row[5] else "",
+            }
+
+        state = self.load_file_state()
+        return state["bank_auth_flows"].get(flow_state)
+
+    def delete_bank_auth_flow(self, flow_state):
+        flow_state = str(flow_state or "").strip()
+        if not flow_state:
+            return
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM bank_auth_flows WHERE state = %s", (flow_state,))
+            return
+
+        state = self.load_file_state()
+        state["bank_auth_flows"].pop(flow_state, None)
+        self.save_file_state(state)
+
     def list_categories(self, email, include_archived=True):
         email = normalize_email(email)
         if DB_MODE:
@@ -1094,6 +1200,8 @@ class ExpenseStore:
                        e.occurred_on,
                        e.created_at,
                        e.updated_at,
+                       e.source,
+                       e.external_id,
                        c.id,
                        c.name,
                        c.color,
@@ -1124,10 +1232,12 @@ class ExpenseStore:
                             "occurred_on": row[5].isoformat() if row[5] else "",
                             "created_at": row[6].isoformat(timespec="seconds") if row[6] else "",
                             "updated_at": row[7].isoformat(timespec="seconds") if row[7] else "",
-                            "category_id": row[8],
-                            "category_name": row[9],
-                            "category_color": row[10],
-                            "category_archived": row[11],
+                            "source": row[8] or "manual",
+                            "external_id": row[9] or "",
+                            "category_id": row[10],
+                            "category_name": row[11],
+                            "category_color": row[12],
+                            "category_archived": row[13],
                         }
                     )
                 )
@@ -1155,6 +1265,8 @@ class ExpenseStore:
                         "occurred_on": raw["occurred_on"],
                         "created_at": raw.get("created_at", ""),
                         "updated_at": raw.get("updated_at", ""),
+                        "source": raw.get("source", "manual"),
+                        "external_id": raw.get("external_id", ""),
                         "category_id": category["id"] if category else None,
                         "category_name": category["name"] if category else "",
                         "category_color": category["color"] if category else "",
@@ -1201,9 +1313,9 @@ class ExpenseStore:
                         cur.execute(
                             """
                             INSERT INTO expense_entries (
-                                user_email, category_id, entry_type, title, notes, amount, occurred_on, created_at, updated_at
+                                user_email, category_id, entry_type, title, notes, amount, occurred_on, source, external_id, created_at, updated_at
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'manual', '', NOW(), NOW())
                             RETURNING id
                             """,
                             (email, category_id, entry_type, title, notes, amount, occurred_on),
@@ -1243,6 +1355,8 @@ class ExpenseStore:
                 "amount": f"{amount:.2f}",
                 "occurred_on": occurred_on.isoformat(),
                 "category_id": category_id,
+                "source": "manual",
+                "external_id": "",
                 "created_at": now,
                 "updated_at": now,
             }
@@ -1287,6 +1401,151 @@ class ExpenseStore:
             raise KeyError("Movimento non trovato.")
         state["entries"][email] = next_entries
         self.save_file_state(state)
+
+    def get_entry_by_external_id(self, email, source, external_id):
+        email = normalize_email(email)
+        source = str(source or "manual").strip().lower() or "manual"
+        external_id = str(external_id or "").strip()
+        if not external_id:
+            return None
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM expense_entries
+                        WHERE user_email = %s AND source = %s AND external_id = %s
+                        LIMIT 1
+                        """,
+                        (email, source, external_id),
+                    )
+                    row = cur.fetchone()
+            if not row:
+                return None
+            return self.get_entry(email, int(row[0]))
+
+        state = self.load_file_state()
+        for raw in state["entries"].get(email, []):
+            if str(raw.get("source") or "manual") == source and str(raw.get("external_id") or "") == external_id:
+                return self.get_entry(email, raw["id"])
+        return None
+
+    def upsert_imported_entry(self, email, transaction):
+        email = normalize_email(email)
+        external_id = str(transaction.get("external_id") or transaction.get("id") or "").strip()
+        if not external_id:
+            return None
+        entry_type = "income" if str(transaction.get("direction") or "expense") == "income" else "expense"
+        title = clean_text(transaction.get("title"), "Movimento Postepay", 72)
+        notes = clean_text(transaction.get("notes"), "", 360)
+        amount = to_decimal(transaction.get("amount"))
+        occurred_on = parse_iso_date(transaction.get("date"))
+
+        existing = self.get_entry_by_external_id(email, "bank", external_id)
+        if DB_MODE:
+            with self.db_connect() as conn:
+                with conn.cursor() as cur:
+                    if existing:
+                        cur.execute(
+                            """
+                            UPDATE expense_entries
+                            SET entry_type = %s,
+                                title = %s,
+                                notes = %s,
+                                amount = %s,
+                                occurred_on = %s,
+                                updated_at = NOW()
+                            WHERE id = %s AND user_email = %s
+                            RETURNING id
+                            """,
+                            (entry_type, title, notes, amount, occurred_on, int(existing["id"]), email),
+                        )
+                        saved_id = int(cur.fetchone()[0])
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO expense_entries (
+                                user_email,
+                                category_id,
+                                entry_type,
+                                title,
+                                notes,
+                                amount,
+                                occurred_on,
+                                source,
+                                external_id,
+                                imported_at,
+                                created_at,
+                                updated_at
+                            )
+                            VALUES (%s, NULL, %s, %s, %s, %s, %s, 'bank', %s, NOW(), NOW(), NOW())
+                            RETURNING id
+                            """,
+                            (email, entry_type, title, notes, amount, occurred_on, external_id),
+                        )
+                        saved_id = int(cur.fetchone()[0])
+            return self.get_entry(email, saved_id)
+
+        state = self.load_file_state()
+        entries = state["entries"].setdefault(email, [])
+        now = datetime.now().isoformat(timespec="seconds")
+        existing_raw = next(
+            (item for item in entries if str(item.get("source") or "manual") == "bank" and str(item.get("external_id") or "") == external_id),
+            None,
+        )
+        if existing_raw:
+            existing_raw["entry_type"] = entry_type
+            existing_raw["title"] = title
+            existing_raw["notes"] = notes
+            existing_raw["amount"] = f"{amount:.2f}"
+            existing_raw["occurred_on"] = occurred_on.isoformat()
+            existing_raw["updated_at"] = now
+            saved_id = existing_raw["id"]
+        else:
+            raw = {
+                "id": state["next_entry_id"],
+                "entry_type": entry_type,
+                "title": title,
+                "notes": notes,
+                "amount": f"{amount:.2f}",
+                "occurred_on": occurred_on.isoformat(),
+                "category_id": None,
+                "source": "bank",
+                "external_id": external_id,
+                "imported_at": now,
+                "created_at": now,
+                "updated_at": now,
+            }
+            state["next_entry_id"] += 1
+            entries.append(raw)
+            saved_id = raw["id"]
+        self.save_file_state(state)
+        return self.get_entry(email, saved_id)
+
+    def sync_bank_transactions(self, email, transactions):
+        imported = 0
+        updated = 0
+        pending_category = 0
+        for transaction in transactions or []:
+            try:
+                existing = self.get_entry_by_external_id(email, "bank", transaction.get("external_id") or transaction.get("id"))
+                saved = self.upsert_imported_entry(email, transaction)
+            except ValueError:
+                continue
+            if not saved:
+                continue
+            if existing:
+                updated += 1
+            else:
+                imported += 1
+            if saved.get("needs_category"):
+                pending_category += 1
+        return {
+            "imported": imported,
+            "updated": updated,
+            "pending_category": pending_category,
+        }
 
     def build_state(self, email, selected_month, profile_mode="month", cycle_day=25):
         month_value, start_date, end_date = month_bounds(selected_month)
@@ -1640,6 +1899,13 @@ def deep_get(source, *paths):
     return None
 
 
+def join_text_list(values):
+    if not isinstance(values, list):
+        return ""
+    parts = [clean_text(item, "", 120) for item in values if clean_text(item, "", 120)]
+    return " | ".join(parts[:4])
+
+
 def normalize_bank_date(value):
     text = str(value or "").strip()
     match = re.match(r"^\d{4}-\d{2}-\d{2}", text)
@@ -1850,12 +2116,18 @@ def normalize_bank_transactions(payload):
             first_non_empty(
                 raw.get("remittance_information_unstructured"),
                 raw.get("remittanceInformationUnstructured"),
+                join_text_list(raw.get("remittance_information")),
+                join_text_list(raw.get("remittanceInformation")),
+                deep_get(raw, ("creditor", "name")),
                 raw.get("creditor_name"),
                 raw.get("creditorName"),
+                deep_get(raw, ("debtor", "name")),
                 raw.get("debtor_name"),
                 raw.get("debtorName"),
                 raw.get("additional_information"),
                 raw.get("additionalInformation"),
+                raw.get("reference_number"),
+                raw.get("referenceNumber"),
                 raw.get("entry_reference"),
                 raw.get("entryReference"),
                 "Movimento Postepay",
@@ -1863,8 +2135,24 @@ def normalize_bank_transactions(payload):
             "Movimento Postepay",
             120,
         )
-        party_name = first_non_empty(raw.get("creditor_name"), raw.get("creditorName"), raw.get("debtor_name"), raw.get("debtorName"))
-        reference = first_non_empty(raw.get("entry_reference"), raw.get("entryReference"), raw.get("internal_transaction_id"), raw.get("internalTransactionId"))
+        party_name = first_non_empty(
+            deep_get(raw, ("creditor", "name")),
+            raw.get("creditor_name"),
+            raw.get("creditorName"),
+            deep_get(raw, ("debtor", "name")),
+            raw.get("debtor_name"),
+            raw.get("debtorName"),
+        )
+        reference = first_non_empty(
+            raw.get("transaction_id"),
+            raw.get("transactionId"),
+            raw.get("entry_reference"),
+            raw.get("entryReference"),
+            raw.get("internal_transaction_id"),
+            raw.get("internalTransactionId"),
+            raw.get("reference_number"),
+            raw.get("referenceNumber"),
+        )
         status = str(raw.get("status") or "")
         notes = " | ".join(
             [
@@ -1872,6 +2160,8 @@ def normalize_bank_transactions(payload):
                 for piece in [
                     str(party_name or "").strip(),
                     f"Rif. {reference}" if reference else "",
+                    join_text_list(raw.get("remittance_information")),
+                    raw.get("note"),
                     status,
                 ]
                 if piece
@@ -1879,7 +2169,8 @@ def normalize_bank_transactions(payload):
         )
         items.append(
             {
-                "id": str(reference or raw.get("transaction_id") or raw.get("transactionId") or index),
+                "id": str(reference or index),
+                "external_id": str(reference or index),
                 "date": normalize_bank_date(
                     first_non_empty(
                         raw.get("booking_date"),
@@ -1926,6 +2217,86 @@ def build_bank_state_payload(bank_link, bank_snapshot):
         "transaction_count": int(bank_snapshot.get("transaction_count", len(transactions)) or 0),
         "transactions": transactions[:12],
         "access_valid_until": bank_link.get("access_valid_until") or "",
+        "pending_category_count": int(bank_snapshot.get("pending_category_count", 0) or 0),
+        "auto_sync_minutes": BANK_AUTO_SYNC_MINUTES,
+    }
+
+
+def fetch_session_details(session_id):
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        return {}
+    return enable_banking_request("GET", f"/sessions/{session_id}")
+
+
+def account_candidates_from_session_payload(payload):
+    candidates = []
+    for item in payload.get("accounts") or []:
+        if isinstance(item, dict):
+            account_uid = first_non_empty(item.get("uid"), item.get("account_uid"), item.get("accountId"))
+            if account_uid:
+                candidates.append({**item, "uid": str(account_uid)})
+    for item in payload.get("accounts_data") or []:
+        if isinstance(item, dict):
+            account_uid = first_non_empty(item.get("uid"), item.get("account_uid"), item.get("accountId"))
+            if account_uid:
+                candidates.append({"uid": str(account_uid)})
+    for item in payload.get("accounts") or []:
+        if isinstance(item, str) and item.strip():
+            try:
+                details = enable_banking_request("GET", f"/accounts/{item}/details")
+            except BankIntegrationError:
+                continue
+            account_uid = first_non_empty(details.get("uid"), item)
+            if account_uid:
+                candidates.append({**details, "uid": str(account_uid)})
+
+    deduped = {}
+    for item in candidates:
+        key = str(item.get("uid") or "").strip()
+        if key:
+            deduped[key] = {**deduped.get(key, {}), **item}
+    return list(deduped.values())
+
+
+def resolve_bank_link_from_code(code, aspsp_name, access_valid_until):
+    session_data = enable_banking_request("POST", "/sessions", json_body={"code": code})
+    session_id = str(session_data.get("session_id") or session_data.get("uid") or session_data.get("sessionId") or "")
+    if not session_id:
+        raise BankIntegrationError("Il provider non ha restituito il session ID del collegamento.", 502)
+
+    session_details = {}
+    for _ in range(3):
+        try:
+            session_details = fetch_session_details(session_id)
+        except BankIntegrationError:
+            session_details = {}
+        status = str(session_details.get("status") or "")
+        if status in {"AUTHORIZED", "RETURNED_FROM_BANK"} or session_details.get("accounts") or session_details.get("accounts_data"):
+            break
+        time.sleep(1)
+
+    accounts = account_candidates_from_session_payload(session_data)
+    if session_details:
+        accounts.extend(account_candidates_from_session_payload(session_details))
+    account = choose_postepay_account(accounts)
+    if not account:
+        raise BankIntegrationError("Nessun conto Postepay disponibile da collegare.", 400)
+
+    valid_until = first_non_empty(
+        deep_get(session_details, ("access", "valid_until")),
+        deep_get(session_data, ("access", "valid_until")),
+        access_valid_until,
+    )
+    return {
+        "provider": ENABLE_BANKING_PROVIDER,
+        "aspsp_name": aspsp_name,
+        "account_uid": str(account.get("uid") or ""),
+        "account_name": bank_account_name(account),
+        "account_iban": bank_account_iban(account),
+        "account_currency": bank_account_currency(account),
+        "session_id": session_id,
+        "access_valid_until": str(valid_until or ""),
     }
 
 
@@ -1947,6 +2318,14 @@ def start_bank_connect_flow(user_email):
     redirect_url = str(first_non_empty(response.get("url"), response.get("redirect_url"), "") or "")
     if not redirect_url:
         raise BankIntegrationError("Il provider bancario non ha restituito l'URL di autorizzazione.", 502)
+    store.save_bank_auth_flow(
+        flow_state,
+        {
+            "user_email": normalize_email(user_email),
+            "aspsp_name": str(aspsp.get("name") or "Postepay Evolution"),
+            "access_valid_until": access_valid_until,
+        },
+    )
     session["enable_banking_state"] = flow_state
     session["enable_banking_user_email"] = normalize_email(user_email)
     session["enable_banking_aspsp_name"] = str(aspsp.get("name") or "Postepay Evolution")
@@ -1960,6 +2339,14 @@ def sync_bank_snapshot(email):
     bank_link = store.get_bank_link(email)
     if not bank_link or not bank_link.get("account_uid"):
         raise BankIntegrationError("Collega prima la tua Postepay Evolution.", 400)
+    if bank_link.get("session_id"):
+        try:
+            session_info = fetch_session_details(bank_link.get("session_id"))
+            status = str(session_info.get("status") or "")
+            if status and status not in {"AUTHORIZED", "RETURNED_FROM_BANK"}:
+                raise BankIntegrationError("Il consenso Postepay non e piu attivo. Ricollega la carta.", 409)
+        except BankIntegrationError:
+            raise
 
     account_uid = bank_link["account_uid"]
     balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/balances")
@@ -1982,6 +2369,9 @@ def sync_bank_snapshot(email):
 
     balances = normalize_bank_balances(balances_payload)
     transactions = normalize_bank_transactions({"transactions": raw_transactions})
+    imported_stats = {"imported": 0, "updated": 0, "pending_category": 0}
+    with lock:
+        imported_stats = store.sync_bank_transactions(email, transactions)
     snapshot = {
         "account_name": bank_link.get("account_name") or "Carta Postepay",
         "account_iban": bank_link.get("account_iban") or "",
@@ -1995,6 +2385,9 @@ def sync_bank_snapshot(email):
         "synced_at": datetime.now().isoformat(timespec="seconds"),
         "date_from": date_from,
         "date_to": date.today().isoformat(),
+        "pending_category_count": imported_stats["pending_category"],
+        "imported_count": imported_stats["imported"],
+        "updated_count": imported_stats["updated"],
     }
     with lock:
         store.save_bank_snapshot(email, snapshot)
@@ -2003,6 +2396,7 @@ def sync_bank_snapshot(email):
 
 
 def clear_bank_flow_session():
+    flow_state = str(session.get("enable_banking_state") or "")
     for key in [
         "enable_banking_state",
         "enable_banking_user_email",
@@ -2010,12 +2404,15 @@ def clear_bank_flow_session():
         "enable_banking_access_valid_until",
     ]:
         session.pop(key, None)
+    return flow_state
 
 
-def bank_redirect_response(status, message=""):
+def bank_redirect_response(status, message="", auto_sync=False):
     query = {"bank_status": status}
     if message:
         query["bank_message"] = str(message)
+    if auto_sync:
+        query["bank_autosync"] = "1"
     return redirect(f"{url_for('index')}?{urlencode(query)}")
 
 
@@ -2300,54 +2697,41 @@ def api_bank_connect():
 
 @app.get("/auth/enable-banking/callback")
 def auth_enable_banking_callback():
-    expected_state = str(session.get("enable_banking_state") or "")
     current_state = str(request.args.get("state") or "")
-    user_email = normalize_email(session.get("enable_banking_user_email") or session.get("user_email"))
-    if not expected_state or not user_email:
+    flow = store.get_bank_auth_flow(current_state)
+    user_email = normalize_email((flow or {}).get("user_email") or session.get("enable_banking_user_email") or session.get("user_email"))
+    if not current_state or not flow or not user_email:
         clear_bank_flow_session()
         return bank_redirect_response("error", "Sessione bancaria scaduta. Riprova il collegamento.")
-    if current_state != expected_state:
-        clear_bank_flow_session()
-        return bank_redirect_response("error", "Stato di autorizzazione non valido.")
     if request.args.get("error"):
         message = request.args.get("error_description") or request.args.get("error") or "Autorizzazione annullata."
         clear_bank_flow_session()
+        store.delete_bank_auth_flow(current_state)
         return bank_redirect_response("error", message)
 
     code = str(request.args.get("code") or "").strip()
     if not code:
         clear_bank_flow_session()
+        store.delete_bank_auth_flow(current_state)
         return bank_redirect_response("error", "Codice di autorizzazione mancante.")
 
-    aspsp_name = str(session.get("enable_banking_aspsp_name") or "Postepay Evolution")
-    access_valid_until = str(session.get("enable_banking_access_valid_until") or "")
+    aspsp_name = str((flow or {}).get("aspsp_name") or session.get("enable_banking_aspsp_name") or "Postepay Evolution")
+    access_valid_until = str((flow or {}).get("access_valid_until") or session.get("enable_banking_access_valid_until") or "")
 
     try:
-        session_data = enable_banking_request("POST", "/sessions", json_body={"code": code})
-        account = choose_postepay_account(session_data.get("accounts") or [])
-        if not account:
-            raise BankIntegrationError("Nessun conto Postepay disponibile da collegare.", 400)
-        bank_link = {
-            "provider": ENABLE_BANKING_PROVIDER,
-            "aspsp_name": aspsp_name,
-            "account_uid": str(account.get("uid") or ""),
-            "account_name": bank_account_name(account),
-            "account_iban": bank_account_iban(account),
-            "account_currency": bank_account_currency(account),
-            "session_id": str(session_data.get("uid") or session_data.get("session_id") or ""),
-            "access_valid_until": access_valid_until,
-        }
+        bank_link = resolve_bank_link_from_code(code, aspsp_name, access_valid_until)
         with lock:
             store.save_bank_link(user_email, bank_link)
-        sync_bank_snapshot(user_email)
     except BankIntegrationError as exc:
         clear_bank_flow_session()
+        store.delete_bank_auth_flow(current_state)
         invalidate_state_cache(user_email)
         return bank_redirect_response("error", str(exc))
 
     clear_bank_flow_session()
+    store.delete_bank_auth_flow(current_state)
     invalidate_state_cache(user_email)
-    return bank_redirect_response("connected", "Postepay collegata con successo.")
+    return bank_redirect_response("connected", "Postepay collegata. Sto sincronizzando saldo e movimenti.", auto_sync=True)
 
 
 @app.post("/api/bank/sync")
@@ -2357,7 +2741,11 @@ def api_bank_sync():
         bank_payload = sync_bank_snapshot(g.current_user["email"])
     except BankIntegrationError as exc:
         return jsonify({"ok": False, "message": str(exc)}), exc.status_code
-    return jsonify({"ok": True, "bank": bank_payload, "message": "Saldo e movimenti Postepay aggiornati."})
+    pending_count = int(bank_payload.get("pending_category_count", 0) or 0)
+    message = "Saldo e movimenti Postepay aggiornati."
+    if pending_count > 0:
+        message = f"Saldo aggiornato e {pending_count} movimenti sono pronti da catalogare."
+    return jsonify({"ok": True, "bank": bank_payload, "message": message})
 
 
 @app.post("/api/bank/disconnect")

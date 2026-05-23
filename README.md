@@ -190,6 +190,14 @@ Nell'app trovi poi:
 - `Collega Postepay` per aprire il consenso PSD2
 - `Aggiorna saldo` per scaricare saldo e movimenti recenti
 - `Scollega` per rimuovere il collegamento e la cache bancaria locale
+- i movimenti bancari vengono importati automaticamente nei movimenti dell'app
+- i movimenti importati restano senza categoria finche non li assegni tu dall'app
+
+Note pratiche:
+
+- il callback da whitelistare e `http://127.0.0.1:8010/auth/enable-banking/callback`
+- se usi `localhost`, whitelistalo separatamente
+- dopo il collegamento la callback reindirizza subito all'app e la sincronizzazione parte in automatico, cosi non resta bloccata sulla pagina di ritorno
 
 Fonti ufficiali utili:
 
