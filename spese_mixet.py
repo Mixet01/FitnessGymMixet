@@ -2410,12 +2410,12 @@ def sync_bank_snapshot(email):
     try:
         for _ in range(ENABLE_BANKING_TX_MAX_PAGES):
             params = dict(base_params)
-        if continuation_key:
-            if continuation_key in seen_continuation_keys:
-                break
-            seen_continuation_keys.add(continuation_key)
-            params["continuation_key"] = continuation_key
-        page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
+            if continuation_key:
+                if continuation_key in seen_continuation_keys:
+                    break
+                seen_continuation_keys.add(continuation_key)
+                params["continuation_key"] = continuation_key
+            page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
             raw_transactions.extend(page.get("transactions") or [])
             continuation_key = page.get("continuation_key")
             if not continuation_key:
