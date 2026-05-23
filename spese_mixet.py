@@ -64,6 +64,8 @@ ENABLE_BANKING_CONSENT_DAYS = max(1, min(180, env_int("ENABLE_BANKING_CONSENT_DA
 ENABLE_BANKING_TX_DAYS = max(7, min(365, env_int("ENABLE_BANKING_TX_DAYS", 90)))
 ENABLE_BANKING_PROVIDER = "enablebanking"
 BANK_AUTO_SYNC_MINUTES = max(5, min(720, env_int("BANK_AUTO_SYNC_MINUTES", 30)))
+ENABLE_BANKING_HTTP_TIMEOUT = max(5, min(60, env_int("ENABLE_BANKING_HTTP_TIMEOUT", 18)))
+ENABLE_BANKING_TX_MAX_PAGES = max(1, min(10, env_int("ENABLE_BANKING_TX_MAX_PAGES", 4)))
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -1939,7 +1941,14 @@ def enable_banking_request(method, path, params=None, json_body=None):
     if json_body is not None:
         headers["Content-Type"] = "application/json"
     try:
-        response = requests.request(method.upper(), url, params=params, json=json_body, headers=headers, timeout=45)
+        response = requests.request(
+            method.upper(),
+            url,
+            params=params,
+            json=json_body,
+            headers=headers,
+            timeout=ENABLE_BANKING_HTTP_TIMEOUT,
+        )
     except requests.RequestException as exc:
         raise BankIntegrationError("Connessione al provider Postepay non riuscita.", 503) from exc
 
@@ -2219,6 +2228,7 @@ def build_bank_state_payload(bank_link, bank_snapshot):
         "access_valid_until": bank_link.get("access_valid_until") or "",
         "pending_category_count": int(bank_snapshot.get("pending_category_count", 0) or 0),
         "auto_sync_minutes": BANK_AUTO_SYNC_MINUTES,
+        "last_error": str(bank_snapshot.get("last_error") or ""),
     }
 
 
@@ -2339,17 +2349,16 @@ def sync_bank_snapshot(email):
     bank_link = store.get_bank_link(email)
     if not bank_link or not bank_link.get("account_uid"):
         raise BankIntegrationError("Collega prima la tua Postepay Evolution.", 400)
-    if bank_link.get("session_id"):
-        try:
-            session_info = fetch_session_details(bank_link.get("session_id"))
-            status = str(session_info.get("status") or "")
-            if status and status not in {"AUTHORIZED", "RETURNED_FROM_BANK"}:
-                raise BankIntegrationError("Il consenso Postepay non e piu attivo. Ricollega la carta.", 409)
-        except BankIntegrationError:
-            raise
+    existing_snapshot = store.get_bank_snapshot(email) or {}
 
     account_uid = bank_link["account_uid"]
-    balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/balances")
+    balances_payload = None
+    balances_error = ""
+    try:
+        balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/balances")
+    except BankIntegrationError as exc:
+        balances_error = str(exc)
+
     date_from = (date.today() - timedelta(days=ENABLE_BANKING_TX_DAYS)).isoformat()
     base_params = {
         "date_from": date_from,
@@ -2357,17 +2366,38 @@ def sync_bank_snapshot(email):
     }
     raw_transactions = []
     continuation_key = None
-    for _ in range(24):
-        params = dict(base_params)
-        if continuation_key:
-            params["continuation_key"] = continuation_key
-        page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
-        raw_transactions.extend(page.get("transactions") or [])
-        continuation_key = page.get("continuation_key")
-        if not continuation_key:
-            break
+    seen_continuation_keys = set()
+    transactions_error = ""
+    try:
+        for _ in range(ENABLE_BANKING_TX_MAX_PAGES):
+            params = dict(base_params)
+            if continuation_key:
+                if continuation_key in seen_continuation_keys:
+                    break
+                seen_continuation_keys.add(continuation_key)
+                params["continuation_key"] = continuation_key
+            page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
+            raw_transactions.extend(page.get("transactions") or [])
+            continuation_key = page.get("continuation_key")
+            if not continuation_key:
+                break
+    except BankIntegrationError as exc:
+        transactions_error = str(exc)
 
-    balances = normalize_bank_balances(balances_payload)
+    if balances_payload is None and not raw_transactions:
+        with lock:
+            store.save_bank_snapshot(
+                email,
+                {
+                    **existing_snapshot,
+                    "last_error": balances_error or transactions_error or "Sincronizzazione non riuscita.",
+                    "synced_at": existing_snapshot.get("synced_at", ""),
+                },
+            )
+        invalidate_state_cache(email)
+        raise BankIntegrationError(balances_error or transactions_error or "Sincronizzazione Postepay non riuscita.", 503)
+
+    balances = normalize_bank_balances(balances_payload or {"balances": []})
     transactions = normalize_bank_transactions({"transactions": raw_transactions})
     imported_stats = {"imported": 0, "updated": 0, "pending_category": 0}
     with lock:
@@ -2375,19 +2405,20 @@ def sync_bank_snapshot(email):
     snapshot = {
         "account_name": bank_link.get("account_name") or "Carta Postepay",
         "account_iban": bank_link.get("account_iban") or "",
-        "currency": balances.get("currency") or bank_link.get("account_currency") or "EUR",
-        "current_balance": balances.get("current_balance"),
-        "available_balance": balances.get("available_balance"),
-        "booked_balance": balances.get("booked_balance"),
-        "balance_label": balances.get("balance_label") or "",
-        "transaction_count": len(transactions),
-        "transactions": transactions[:60],
+        "currency": balances.get("currency") or existing_snapshot.get("currency") or bank_link.get("account_currency") or "EUR",
+        "current_balance": balances.get("current_balance") if balances.get("current_balance") is not None else existing_snapshot.get("current_balance"),
+        "available_balance": balances.get("available_balance") if balances.get("available_balance") is not None else existing_snapshot.get("available_balance"),
+        "booked_balance": balances.get("booked_balance") if balances.get("booked_balance") is not None else existing_snapshot.get("booked_balance"),
+        "balance_label": balances.get("balance_label") or existing_snapshot.get("balance_label") or "",
+        "transaction_count": len(transactions) if transactions else int(existing_snapshot.get("transaction_count", 0) or 0),
+        "transactions": transactions[:60] if transactions else (existing_snapshot.get("transactions") or [])[:60],
         "synced_at": datetime.now().isoformat(timespec="seconds"),
         "date_from": date_from,
         "date_to": date.today().isoformat(),
         "pending_category_count": imported_stats["pending_category"],
         "imported_count": imported_stats["imported"],
         "updated_count": imported_stats["updated"],
+        "last_error": " | ".join([part for part in [balances_error, transactions_error] if part]),
     }
     with lock:
         store.save_bank_snapshot(email, snapshot)
@@ -2745,6 +2776,8 @@ def api_bank_sync():
     message = "Saldo e movimenti Postepay aggiornati."
     if pending_count > 0:
         message = f"Saldo aggiornato e {pending_count} movimenti sono pronti da catalogare."
+    if bank_payload.get("last_error"):
+        message = f"{message} Alcuni dati potrebbero essere parziali: {bank_payload['last_error']}"
     return jsonify({"ok": True, "bank": bank_payload, "message": message})
 
 
