@@ -200,7 +200,26 @@
   }
 
   async function api(url, options = {}) {
-    const response = await fetch(url, { ...options, cache: "no-store" });
+    const timeoutMs = Number(options.timeoutMs || 0);
+    const fetchOptions = { ...options, cache: "no-store" };
+    delete fetchOptions.timeoutMs;
+    let timeoutId = null;
+    if (timeoutMs > 0) {
+      const controller = new AbortController();
+      fetchOptions.signal = controller.signal;
+      timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    }
+    let response;
+    try {
+      response = await fetch(url, fetchOptions);
+    } catch (err) {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (err && err.name === "AbortError") {
+        throw new Error("La richiesta ha impiegato troppo tempo. Riprova tra poco.");
+      }
+      throw err;
+    }
+    if (timeoutId) window.clearTimeout(timeoutId);
     let data = null;
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
@@ -486,7 +505,7 @@
     els.bankAccountName.textContent = bank.connected ? (bank.account_name || "Carta Postepay") : "Nessun collegamento";
     els.bankIban.textContent = bank.account_iban || "IBAN o PAN non disponibile";
     els.bankValidUntil.textContent = formatAccessDate(bank.access_valid_until);
-    els.bankMessage.textContent = flashMessage || "";
+    els.bankMessage.textContent = flashMessage || bank.last_error || "";
 
     if (!bank.configured) {
       els.bankStatusText.textContent = "Manca la configurazione del provider PSD2 per collegare davvero la Postepay.";
@@ -712,13 +731,19 @@
     state.bankSyncInFlight = true;
     renderBank();
     try {
-      const data = await api("/api/bank/sync", { method: "POST" });
+      const data = await api("/api/bank/sync", { method: "POST", timeoutMs: 25000 });
       state.bankFlash = options.preserveFlash && state.bankFlash
         ? state.bankFlash
         : { status: "success", message: data.message || "Saldo Postepay aggiornato." };
       state.bankAutoSyncRequested = false;
       state.bankAutoSyncDone = true;
       await refreshState();
+    } catch (err) {
+      state.bankFlash = { status: "error", message: err.message || "Sincronizzazione Postepay non riuscita." };
+      state.bankAutoSyncRequested = false;
+      state.bankAutoSyncDone = false;
+      renderBank();
+      throw err;
     } finally {
       state.bankSyncInFlight = false;
       renderBank();
