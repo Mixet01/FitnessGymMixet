@@ -61,6 +61,7 @@
       access_valid_until: "",
       pending_category_count: 0,
       auto_sync_minutes: 30,
+      last_error: "",
     },
     bankFlash: null,
     bankAutoSyncRequested: false,
@@ -155,7 +156,7 @@
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
   const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
-  const assetVersion = (els.body.dataset.assetVersion || "2026-05-23-v6").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-23-v7").trim();
   const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
   const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
   const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
@@ -449,6 +450,7 @@
   }
 
   function renderProfileBreakdown() {
+    if (!els.profileBreakdown) return;
     const summary = state.profileSummary;
     const lines = [
       `Periodo attivo: ${state.profilePeriod.label || "-"}`,
@@ -552,32 +554,7 @@
   }
 
   function renderProfile() {
-    const user = state.me || {};
-    const summary = state.profileSummary || {};
-    els.profileName.textContent = user.name || "Profilo";
-    els.profileEmail.textContent = user.email || "";
-    els.profilePeriodLabel.value = state.profilePeriod.label || "";
-    els.profileCycleDay.value = String(state.profilePeriod.cycle_day || state.profileCycleDay || 25);
-    els.profileCycleDay.disabled = state.profileMode !== "cycle";
-    els.profileBalance.textContent = formatMoney(summary.balance || 0);
-    els.profileExpenseTotal.textContent = formatMoney(summary.expense_total || 0);
-    els.profileIncomeTotal.textContent = formatMoney(summary.income_total || 0);
-    els.profileCount.textContent = String(summary.transaction_count || 0);
-    els.profileAverage.textContent = formatMoney(summary.average_expense || 0);
-    els.profileDaily.textContent = formatMoney(summary.daily_expense || 0);
-    els.profileDays.textContent = String(summary.active_days || 0);
-    els.profileSavingRate.textContent = summary.savings_rate == null ? "-" : `${summary.savings_rate}%`;
-    els.profileModeButtons.forEach((button) => {
-      button.classList.toggle("active", button.dataset.profileMode === state.profileMode);
-    });
-    renderProfileBreakdown();
     renderBank();
-
-    if (user.picture) {
-      els.profileAvatar.innerHTML = `<img src="${escapeHtml(user.picture)}" alt="${escapeHtml(user.name || "avatar")}" style="width:100%;height:100%;object-fit:cover;border-radius:22px;">`;
-    } else {
-      els.profileAvatar.textContent = avatarText(user);
-    }
   }
 
   function renderApp() {
@@ -614,11 +591,7 @@
   async function refreshState(options = {}) {
     if (state.refreshPromise) return state.refreshPromise;
     const run = (async () => {
-      const params = new URLSearchParams({
-        month: state.month,
-        profile_mode: state.profileMode,
-        cycle_day: String(state.profileCycleDay),
-      });
+      const params = new URLSearchParams({ month: state.month });
       const data = await api(`/api/state?${params.toString()}`);
       state.month = data.month;
       state.monthLabel = data.month_label;
@@ -631,13 +604,15 @@
       state.bank = data.bank || state.bank;
       state.lastStateFetchAt = Date.now();
       renderApp();
-      maybeAutoSyncBank();
     })();
     state.refreshPromise = run;
     try {
       await run;
     } finally {
       state.refreshPromise = null;
+    }
+    if (!options.skipAutoSync) {
+      maybeAutoSyncBank();
     }
   }
 
@@ -732,12 +707,14 @@
     renderBank();
     try {
       const data = await api("/api/bank/sync", { method: "POST", timeoutMs: 25000 });
+      state.bank = data.bank || state.bank;
       state.bankFlash = options.preserveFlash && state.bankFlash
         ? state.bankFlash
         : { status: "success", message: data.message || "Saldo Postepay aggiornato." };
       state.bankAutoSyncRequested = false;
       state.bankAutoSyncDone = true;
-      await refreshState();
+      renderBank();
+      await refreshState({ skipAutoSync: true });
     } catch (err) {
       state.bankFlash = { status: "error", message: err.message || "Sincronizzazione Postepay non riuscita." };
       state.bankAutoSyncRequested = false;
@@ -873,23 +850,6 @@
       });
     });
 
-    els.profileModeButtons.forEach((button) => {
-      button.addEventListener("click", () => {
-        state.profileMode = button.dataset.profileMode;
-        refreshState().catch((err) => alert(err.message));
-      });
-    });
-
-    els.profileCycleDay.addEventListener("change", () => {
-      const nextDay = Number(els.profileCycleDay.value || 25);
-      state.profileCycleDay = Math.max(1, Math.min(28, nextDay));
-      if (state.profileMode === "cycle") {
-        refreshState().catch((err) => alert(err.message));
-      } else {
-        els.profileCycleDay.value = String(state.profileCycleDay);
-      }
-    });
-
     els.searchInput.addEventListener("input", () => {
       state.search = els.searchInput.value || "";
       renderMovements();
@@ -919,18 +879,18 @@
       }
     });
 
-    els.exportCsv.addEventListener("click", () => {
-      const params = new URLSearchParams({
-        month: state.month,
-        profile_mode: state.profileMode,
-        cycle_day: String(state.profileCycleDay),
+    if (els.exportCsv) {
+      els.exportCsv.addEventListener("click", () => {
+        const params = new URLSearchParams({ month: state.month });
+        window.open(`/api/export.csv?${params.toString()}`, "_blank");
       });
-      window.open(`/api/export.csv?${params.toString()}`, "_blank");
-    });
+    }
 
-    els.logoutBtn.addEventListener("click", () => {
-      logout().catch((err) => alert(err.message));
-    });
+    if (els.logoutBtn) {
+      els.logoutBtn.addEventListener("click", () => {
+        logout().catch((err) => alert(err.message));
+      });
+    }
 
     els.bankConnect.addEventListener("click", () => {
       connectBank().catch((err) => alert(err.message));
