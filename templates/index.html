@@ -168,87 +168,11 @@
 
       <section id="screen-profile" class="screen">
         <div class="panel profile-panel">
-          <div class="panel-head blocky">
-            <div>
-              <h3 id="profile-name">Profilo</h3>
-              <p id="profile-email" class="helper">email</p>
-            </div>
-            <div id="profile-avatar" class="avatar-shell">SM</div>
-          </div>
-
-          <div class="profile-period-card">
-            <div class="panel-head blocky compact">
-              <div>
-                <h3>Periodo di riferimento</h3>
-                <p class="helper">Scegli un mese classico oppure un ciclo personalizzato.</p>
-              </div>
-            </div>
-            <div class="chips">
-              <button id="profile-mode-month" class="chip active" data-profile-mode="month">Mensile</button>
-              <button id="profile-mode-cycle" class="chip" data-profile-mode="cycle">Dal giorno X al giorno X</button>
-            </div>
-            <div class="field-grid period-grid">
-              <label>
-                <span>Giorno inizio ciclo</span>
-                <input id="profile-cycle-day" type="number" min="1" max="28" value="25">
-              </label>
-              <label>
-                <span>Periodo attivo</span>
-                <input id="profile-period-label" type="text" readonly>
-              </label>
-            </div>
-          </div>
-
-          <div class="profile-stats">
-            <div class="profile-stat">
-              <span class="mini-label">Saldo periodo</span>
-              <strong id="profile-balance">EUR 0,00</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Spese totali</span>
-              <strong id="profile-expense-total">EUR 0,00</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Entrate totali</span>
-              <strong id="profile-income-total">EUR 0,00</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Movimenti</span>
-              <strong id="profile-count">0</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Spesa media</span>
-              <strong id="profile-average">EUR 0,00</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Spesa giornaliera</span>
-              <strong id="profile-daily">EUR 0,00</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Giorni attivi</span>
-              <strong id="profile-days">0</strong>
-            </div>
-            <div class="profile-stat">
-              <span class="mini-label">Risparmio</span>
-              <strong id="profile-saving-rate">-</strong>
-            </div>
-          </div>
-
-          <div class="panel inset-panel">
-            <div class="panel-head blocky compact">
-              <div>
-                <h3>Riepilogo completo</h3>
-                <p class="helper">Tutti i dati principali del periodo selezionato.</p>
-              </div>
-            </div>
-            <div id="profile-breakdown" class="stack-list"></div>
-          </div>
-
           <div class="panel inset-panel bank-panel">
             <div class="panel-head blocky compact">
               <div>
                 <h3>Postepay Evolution</h3>
-                <p id="bank-status-text" class="helper">Collega la carta per vedere saldo e movimenti.</p>
+                <p id="bank-status-text" class="helper">Saldo live e movimenti importati in automatico.</p>
               </div>
               <span id="bank-sync-chip" class="soft-chip">Non collegata</span>
             </div>
@@ -281,7 +205,6 @@
           </div>
 
           <div class="profile-actions">
-            <button id="export-csv" class="btn secondary">Esporta CSV</button>
             <button id="logout-btn" class="btn danger">Esci</button>
           </div>
         </div>
