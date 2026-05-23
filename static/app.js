@@ -59,8 +59,13 @@
       transaction_count: 0,
       transactions: [],
       access_valid_until: "",
+      pending_category_count: 0,
+      auto_sync_minutes: 30,
     },
     bankFlash: null,
+    bankAutoSyncRequested: false,
+    bankSyncInFlight: false,
+    bankAutoSyncDone: false,
     lastStateFetchAt: 0,
     refreshPromise: null,
   };
@@ -150,7 +155,7 @@
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
   const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
-  const assetVersion = (els.body.dataset.assetVersion || "2026-05-20-v5").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-23-v6").trim();
   const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
   const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
   const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
@@ -231,11 +236,19 @@
     const url = new URL(window.location.href);
     const status = (url.searchParams.get("bank_status") || "").trim();
     const message = (url.searchParams.get("bank_message") || "").trim();
-    if (!status && !message) return;
-    state.bankFlash = { status: status || "info", message };
-    setActiveScreen("screen-profile");
+    const autoSync = (url.searchParams.get("bank_autosync") || "").trim() === "1";
+    if (status || message) {
+      state.bankFlash = { status: status || "info", message };
+      setActiveScreen("screen-profile");
+    }
+    if (autoSync) {
+      state.bankAutoSyncRequested = true;
+      setActiveScreen("screen-profile");
+    }
+    if (!status && !message && !autoSync) return;
     url.searchParams.delete("bank_status");
     url.searchParams.delete("bank_message");
+    url.searchParams.delete("bank_autosync");
     const cleanUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}${url.hash || ""}`;
     window.history.replaceState({}, "", cleanUrl);
   }
@@ -342,9 +355,11 @@
   function filteredEntries() {
     const term = state.search.trim().toLowerCase();
     return state.entries.filter((entry) => {
-      if (state.filterType !== "all" && entry.entry_type !== state.filterType) return false;
+      if (state.filterType === "expense" && entry.entry_type !== "expense") return false;
+      if (state.filterType === "income" && entry.entry_type !== "income") return false;
+      if (state.filterType === "uncategorized" && !entry.needs_category) return false;
       if (!term) return true;
-      const haystack = `${entry.title} ${entry.notes} ${(entry.category && entry.category.name) || ""}`.toLowerCase();
+      const haystack = `${entry.title} ${entry.notes} ${(entry.category && entry.category.name) || ""} ${entry.source || ""}`.toLowerCase();
       return haystack.includes(term);
     });
   }
@@ -353,12 +368,15 @@
     const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#27e89d" : "#ff4d7a");
     const amountClass = entry.entry_type === "income" ? "income" : "expense";
     const categoryLabel = entry.category ? entry.category.name : "Senza categoria";
+    const sourceTag = entry.imported ? "<span class='soft-chip'>Postepay</span>" : "";
+    const categoryTag = entry.needs_category ? "<span class='soft-chip needs-tag'>Da catalogare</span>" : "";
     return `
       <article class="movement-row" data-entry-id="${entry.id}">
         <span class="dot" style="background:${escapeHtml(dotColor)};"></span>
         <div class="movement-copy">
           <strong>${escapeHtml(entry.title)}</strong>
           <p>${escapeHtml(formatShortDate(entry.occurred_on))} - ${escapeHtml(categoryLabel)}</p>
+          <div class="movement-tags">${sourceTag}${categoryTag}</div>
           ${entry.notes ? `<p>${escapeHtml(entry.notes)}</p>` : ""}
           <div class="movement-actions">
             <button class="mini-btn" data-entry-action="edit" data-entry-id="${entry.id}">Modifica</button>
@@ -493,10 +511,18 @@
       return;
     }
 
-    els.bankStatusText.textContent = bank.last_sync_at
-      ? `Saldo e movimenti aggiornati al ${formatDateTime(bank.last_sync_at)}.`
-      : "Carta collegata. Puoi aggiornare saldo e movimenti quando vuoi.";
-    els.bankSyncChip.textContent = bank.last_sync_at ? "Sincronizzata" : "Collegata";
+    els.bankStatusText.textContent = state.bankSyncInFlight
+      ? "Sto sincronizzando saldo e movimenti Postepay."
+      : bank.last_sync_at
+        ? `Saldo e movimenti aggiornati al ${formatDateTime(bank.last_sync_at)}.`
+        : "Carta collegata. Sto aspettando la prima sincronizzazione.";
+    if (state.bankSyncInFlight) {
+      els.bankSyncChip.textContent = "Sincronizzo";
+    } else if ((bank.pending_category_count || 0) > 0) {
+      els.bankSyncChip.textContent = `${bank.pending_category_count} da catalogare`;
+    } else {
+      els.bankSyncChip.textContent = bank.last_sync_at ? "Sincronizzata" : "Collegata";
+    }
 
     if (!(bank.transactions || []).length) {
       els.bankTransactionList.innerHTML = "<div class='empty-state'>Nessun movimento scaricato. Premi Aggiorna saldo per sincronizzare i dati.</div>";
@@ -586,6 +612,7 @@
       state.bank = data.bank || state.bank;
       state.lastStateFetchAt = Date.now();
       renderApp();
+      maybeAutoSyncBank();
     })();
     state.refreshPromise = run;
     try {
@@ -668,16 +695,48 @@
     window.location.assign(data.redirect_url);
   }
 
-  async function syncBank() {
-    const data = await api("/api/bank/sync", { method: "POST" });
-    state.bankFlash = { status: "success", message: data.message || "Saldo Postepay aggiornato." };
-    await refreshState();
+  function needsBankAutoSync() {
+    const bank = state.bank || {};
+    if (!bank.connected || !bank.configured) return false;
+    if (state.bankSyncInFlight) return false;
+    if (state.bankAutoSyncRequested) return true;
+    if (!bank.last_sync_at) return true;
+    const lastSync = new Date(String(bank.last_sync_at).replace(" ", "T"));
+    if (Number.isNaN(lastSync.getTime())) return true;
+    const ageMinutes = (Date.now() - lastSync.getTime()) / 60000;
+    return ageMinutes >= Number(bank.auto_sync_minutes || 30);
+  }
+
+  async function syncBank(options = {}) {
+    if (state.bankSyncInFlight) return;
+    state.bankSyncInFlight = true;
+    renderBank();
+    try {
+      const data = await api("/api/bank/sync", { method: "POST" });
+      state.bankFlash = options.preserveFlash && state.bankFlash
+        ? state.bankFlash
+        : { status: "success", message: data.message || "Saldo Postepay aggiornato." };
+      state.bankAutoSyncRequested = false;
+      state.bankAutoSyncDone = true;
+      await refreshState();
+    } finally {
+      state.bankSyncInFlight = false;
+      renderBank();
+    }
+  }
+
+  function maybeAutoSyncBank() {
+    if (state.bankAutoSyncDone && !state.bankAutoSyncRequested) return;
+    if (!needsBankAutoSync()) return;
+    syncBank({ preserveFlash: true }).catch(() => {});
   }
 
   async function disconnectBank() {
     if (!window.confirm("Scollegare Postepay e rimuovere saldo e movimenti sincronizzati?")) return;
     const data = await api("/api/bank/disconnect", { method: "POST" });
     state.bankFlash = { status: "info", message: data.message || "Collegamento rimosso." };
+    state.bankAutoSyncRequested = false;
+    state.bankAutoSyncDone = false;
     await refreshState();
   }
 

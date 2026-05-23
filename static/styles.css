@@ -675,6 +675,23 @@ textarea:focus {
   font-weight: 700;
 }
 
+.movement-tags {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.movement-tags .soft-chip {
+  padding: 6px 10px;
+}
+
+.needs-tag {
+  color: #ffd7a1;
+  border-color: rgba(255, 184, 77, 0.25);
+  background: rgba(255, 184, 77, 0.12);
+}
+
 .chip.active {
   color: var(--text);
   border-color: rgba(77, 163, 255, 0.2);
