@@ -51,8 +51,8 @@ ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "SM").strip() or "SM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
 SESSION_DAYS = env_int("SPESE_MIXET_SESSION_DAYS", 90)
-ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-23-v6").strip() or "2026-05-23-v6"
-STATE_CACHE_TTL = max(0, env_int("SPESE_MIXET_STATE_CACHE_TTL", 12))
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-23-v7").strip() or "2026-05-23-v7"
+STATE_CACHE_TTL = max(0, env_int("SPESE_MIXET_STATE_CACHE_TTL", 45))
 ENABLE_BANKING_BASE_URL = os.environ.get("ENABLE_BANKING_BASE_URL", "https://api.enablebanking.com").strip().rstrip("/")
 ENABLE_BANKING_APP_ID = os.environ.get("ENABLE_BANKING_APP_ID", "").strip()
 ENABLE_BANKING_PRIVATE_KEY = os.environ.get("ENABLE_BANKING_PRIVATE_KEY", "")
@@ -61,11 +61,11 @@ ENABLE_BANKING_COUNTRY = os.environ.get("ENABLE_BANKING_COUNTRY", "IT").strip().
 ENABLE_BANKING_ASPSP_NAME = os.environ.get("ENABLE_BANKING_ASPSP_NAME", "").strip()
 ENABLE_BANKING_ASPSP_MATCH = os.environ.get("ENABLE_BANKING_ASPSP_MATCH", "postepay,poste italiane,poste").strip()
 ENABLE_BANKING_CONSENT_DAYS = max(1, min(180, env_int("ENABLE_BANKING_CONSENT_DAYS", 90)))
-ENABLE_BANKING_TX_DAYS = max(7, min(365, env_int("ENABLE_BANKING_TX_DAYS", 90)))
+ENABLE_BANKING_TX_DAYS = max(7, min(730, env_int("ENABLE_BANKING_TX_DAYS", 365)))
 ENABLE_BANKING_PROVIDER = "enablebanking"
 BANK_AUTO_SYNC_MINUTES = max(5, min(720, env_int("BANK_AUTO_SYNC_MINUTES", 30)))
 ENABLE_BANKING_HTTP_TIMEOUT = max(5, min(60, env_int("ENABLE_BANKING_HTTP_TIMEOUT", 18)))
-ENABLE_BANKING_TX_MAX_PAGES = max(1, min(10, env_int("ENABLE_BANKING_TX_MAX_PAGES", 4)))
+ENABLE_BANKING_TX_MAX_PAGES = max(1, min(50, env_int("ENABLE_BANKING_TX_MAX_PAGES", 20)))
 
 DEFAULT_CATEGORY_SEEDS = [
     {"name": "Casa", "color": "#d95d39"},
@@ -1570,20 +1570,30 @@ class ExpenseStore:
             )
 
         summary = self.build_month_summary(entries, month_value)
-        profile_period = resolve_profile_period(month_value, profile_mode, cycle_day)
-        if profile_period["start_date"] == start_date and profile_period["end_date"] == end_date:
-            profile_entries = entries
-        else:
-            profile_entries = self.list_entries(
-                email,
-                start_date=profile_period["start_date"],
-                end_date=profile_period["end_date"],
-            )
-        profile_summary = self.build_profile_summary(
-            profile_entries,
-            profile_period["start_date"],
-            profile_period["end_date"],
-        )
+        profile_period = {
+            "mode": "month",
+            "cycle_day": 25,
+            "label": month_label(month_value),
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        profile_summary = {
+            "expense_total": 0.0,
+            "income_total": 0.0,
+            "balance": 0.0,
+            "expense_count": 0,
+            "income_count": 0,
+            "transaction_count": 0,
+            "active_days": 0,
+            "average_expense": 0.0,
+            "average_income": 0.0,
+            "daily_expense": 0.0,
+            "savings_rate": None,
+            "period_days": max(1, (end_date - start_date).days),
+            "top_category": None,
+            "category_totals": [],
+            "biggest_expense": None,
+        }
         payload = {
             "month": month_value,
             "month_label": month_label(month_value),
@@ -2063,12 +2073,33 @@ def choose_postepay_account(accounts):
 
 def money_payload_value(payload):
     if isinstance(payload, dict):
-        return round(money_to_float(payload.get("amount")), 2), str(payload.get("currency") or "EUR")
+        return round(money_to_float(first_non_empty(payload.get("amount"), payload.get("value"))), 2), str(payload.get("currency") or payload.get("currency_code") or "EUR")
     return round(money_to_float(payload), 2), "EUR"
 
 
+def extract_balance_rows(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    candidates = [
+        payload.get("balances"),
+        payload.get("balance"),
+        deep_get(payload, ("account", "balances")),
+        deep_get(payload, ("account", "balance")),
+        deep_get(payload, ("data", "balances")),
+        deep_get(payload, ("data", "balance")),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, list):
+            return candidate
+        if isinstance(candidate, dict):
+            return [candidate]
+    return []
+
+
 def normalize_bank_balances(payload):
-    raw_items = payload.get("balances") or []
+    raw_items = extract_balance_rows(payload)
     if not raw_items:
         return {
             "currency": "EUR",
@@ -2089,13 +2120,17 @@ def normalize_bank_balances(payload):
         amount, currency = money_payload_value(first_non_empty(item.get("balance_amount"), item.get("balanceAmount")))
         name = str(item.get("name") or "").strip().lower()
         balance_type = str(item.get("balance_type") or item.get("balanceType") or "").strip().lower()
-        if available_balance is None and ("available" in name or "available" in balance_type):
-            available_balance = round(amount, 2)
-        if booked_balance is None and ("booked" in name or "booked" in balance_type):
-            booked_balance = round(amount, 2)
-        if current_balance is None:
+        if current_balance is None and amount is not None:
             current_balance = round(amount, 2)
             first_currency = currency or first_currency
+        if available_balance is None and ("available" in name or "available" in balance_type):
+            available_balance = round(amount, 2)
+            if current_balance is None:
+                current_balance = available_balance
+        if booked_balance is None and ("booked" in name or "booked" in balance_type):
+            booked_balance = round(amount, 2)
+            if current_balance is None:
+                current_balance = booked_balance
 
     if current_balance is None:
         current_balance = available_balance if available_balance is not None else booked_balance
@@ -2358,6 +2393,10 @@ def sync_bank_snapshot(email):
         balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/balances")
     except BankIntegrationError as exc:
         balances_error = str(exc)
+        try:
+            balances_payload = enable_banking_request("GET", f"/accounts/{account_uid}/details")
+        except BankIntegrationError:
+            balances_payload = None
 
     date_from = (date.today() - timedelta(days=ENABLE_BANKING_TX_DAYS)).isoformat()
     base_params = {
@@ -2371,12 +2410,12 @@ def sync_bank_snapshot(email):
     try:
         for _ in range(ENABLE_BANKING_TX_MAX_PAGES):
             params = dict(base_params)
-            if continuation_key:
-                if continuation_key in seen_continuation_keys:
-                    break
-                seen_continuation_keys.add(continuation_key)
-                params["continuation_key"] = continuation_key
-            page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
+        if continuation_key:
+            if continuation_key in seen_continuation_keys:
+                break
+            seen_continuation_keys.add(continuation_key)
+            params["continuation_key"] = continuation_key
+        page = enable_banking_request("GET", f"/accounts/{account_uid}/transactions", params=params)
             raw_transactions.extend(page.get("transactions") or [])
             continuation_key = page.get("continuation_key")
             if not continuation_key:
