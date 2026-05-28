@@ -25,23 +25,23 @@
   <section id="boot-splash" class="boot-splash">
     <article class="boot-card">
       <p class="eyebrow">Fitness Gym Mixet</p>
-      <h1>Sto preparando il tuo coach numerico.</h1>
-      <p class="helper">Calcolo BMI, BMR, TDEE, BF e piano macro con login Google e storico su database.</p>
+      <h1>Sto preparando la tua dashboard.</h1>
+      <p class="helper">Calcolo BMI, BMR, TDEE, BF e piano dieta dinamico in base al tipo dieta scelto.</p>
     </article>
   </section>
 
   <section id="auth-gate" class="gate hidden">
     <article class="hero-panel">
-      <p class="eyebrow">Fitness Gym</p>
-      <h1>Il tuo calcolatore dieta in stile mobile.</h1>
-      <p class="lead">Compila peso, altezza, fattore attività e tipo dieta. Peso ideale e target BF sono opzionali: l'app stima il fabbisogno, imposta i macro e conserva tutto nel tuo account.</p>
+      <p class="eyebrow">Fitness Gym Mixet</p>
+      <h1>La tua dashboard fitness, senza rumore.</h1>
+      <p class="lead">Compila peso, altezza, fattore attivita e tipo dieta. Peso ideale e target BF sono opzionali, le macro cambiano in automatico in base alla dieta scelta.</p>
       <div class="hero-pills">
         <span>BMI</span>
         <span>BMR</span>
         <span>TDEE</span>
-        <span>BF Navy opzionale</span>
+        <span>BF opzionale</span>
+        <span>Dieta dinamica</span>
         <span>Obiettivi opzionali</span>
-        <span>Macro variabili</span>
       </div>
     </article>
 
@@ -69,11 +69,12 @@
       <div class="top-copy">
         <p class="eyebrow">Fitness Gym Mixet</p>
         <h1 id="welcome-name">Ciao</h1>
-        <p id="header-subtitle" class="helper">Il tuo piano fitness sincronizzato</p>
+        <p id="header-subtitle" class="helper">Dashboard pronta</p>
       </div>
       <div class="top-controls">
         <span id="sync-chip" class="soft-chip">Pronto</span>
         <button id="generate-from-header" class="btn accent">Calcola piano</button>
+        <button id="logout-btn" class="btn secondary">Esci</button>
       </div>
     </header>
 
@@ -81,322 +82,211 @@
       <section id="screen-dashboard" class="screen active">
         <div class="hero-grid">
           <article class="hero-card balance">
-            <span class="mini-label">BMI</span>
-            <strong id="metric-bmi">0.0</strong>
-            <p id="metric-bmi-note" class="helper">Classe BMI</p>
+            <span class="mini-label">Peso attuale</span>
+            <strong id="metric-weight">0.0 kg</strong>
+            <p class="helper">BMI: <strong id="metric-bmi">0.0</strong> - <span id="metric-bmi-note">Classe BMI</span></p>
           </article>
           <article class="mini-card">
             <span class="mini-label">BMR</span>
             <strong id="metric-bmr">0 kcal</strong>
+            <p class="helper">Metabolismo basale</p>
           </article>
           <article class="mini-card">
             <span class="mini-label">TDEE</span>
             <strong id="metric-tdee">0 kcal</strong>
+            <p class="helper">Calorie di mantenimento</p>
+          </article>
+          <article class="mini-card">
+            <span class="mini-label">BF</span>
+            <strong id="metric-bf">0.0%</strong>
+            <p class="helper"><span id="bf-method-chip" class="soft-chip">In attesa</span></p>
           </article>
         </div>
 
-        <div class="panel-grid dashboard-single">
+        <div class="panel-grid dashboard-grid">
           <article class="panel">
             <div class="panel-head blocky">
               <div>
-                <h3>BF e target</h3>
-                <p class="helper">Stima, obiettivi opzionali e calorie target.</p>
+                <h3>Calcolatore</h3>
+                <p class="helper">Scegli attivita, metodo BF e tipo dieta. Peso ideale e target BF sono opzionali.</p>
               </div>
-              <span id="bf-method-chip" class="soft-chip">In attesa</span>
+              <span id="activity-chip" class="soft-chip">Attivita: moderata (1.550)</span>
             </div>
-            <div class="macro-grid dashboard-metrics">
-              <div class="metric-card">
-                <span class="mini-label">BF attuale</span>
-                <strong id="metric-bf">0.0%</strong>
-              </div>
-              <div class="metric-card">
-                <span class="mini-label">Peso ideale</span>
-                <strong id="metric-ideal-weight">0.0 kg</strong>
-              </div>
-              <div class="metric-card">
-                <span class="mini-label">Calorie target</span>
-                <strong id="metric-calories">0 kcal</strong>
-              </div>
-              <div class="metric-card">
-                <span class="mini-label">Target BF ideale</span>
-                <strong id="metric-target-bf">0.0%</strong>
-              </div>
-            </div>
-            <p id="plan-summary" class="helper plan-summary">Compila il form per generare il piano.</p>
-          </article>
-        </div>
-      </section>
 
-      <section id="screen-calc" class="screen">
-        <div class="panel">
-          <div class="panel-head blocky">
-            <div>
-              <h3>Calcolatore</h3>
-              <p class="helper">Inserisci i dati base, scegli il fattore attività e il tipo dieta.</p>
-            </div>
-            <span id="activity-chip" class="soft-chip">Attività: moderata (1.550)</span>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              <span>Sesso</span>
-              <select id="sex-select">
-                <option value="male">Maschio</option>
-                <option value="female">Femmina</option>
-              </select>
-            </label>
-            <label>
-              <span>Età</span>
-              <input id="age-input" type="number" min="14" max="99" step="1" placeholder="30">
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              <span>Altezza (cm)</span>
-              <input id="height-input" type="number" min="120" max="230" step="0.1" placeholder="175">
-            </label>
-            <label>
-              <span>Peso attuale (kg)</span>
-              <input id="weight-input" type="number" min="30" max="400" step="0.1" placeholder="74">
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              <span>Fattore attivita</span>
-              <select id="activity-select"></select>
-            </label>
-            <div class="hint-card">
-              Scegli il valore che vuoi usare: il fattore numerico è già visibile nel menu e nel chip sopra.
-            </div>
-          </div>
-
-          <div class="panel inset-panel">
-            <div class="panel-head blocky compact">
-              <div>
-                <h3>Metodo BF</h3>
-                <p class="helper">Scegli tra manuale, Navy o stima automatica.</p>
-              </div>
-            </div>
             <div class="field-grid">
               <label>
-                <span>Metodo</span>
-                <select id="bf-method-select">
-                  <option value="auto">Automatico</option>
-                  <option value="navy">Navy</option>
-                  <option value="manual">Manuale</option>
+                <span>Sesso</span>
+                <select id="sex-select">
+                  <option value="male">Maschio</option>
+                  <option value="female">Femmina</option>
                 </select>
               </label>
-              <div id="bf-manual-block">
-                <label>
-                  <span>BF manuale %</span>
-                  <input id="body-fat-manual-input" type="number" min="3" max="80" step="0.1" placeholder="18.0">
-                </label>
+              <label>
+                <span>Eta</span>
+                <input id="age-input" type="number" min="14" max="99" step="1" placeholder="30">
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                <span>Altezza (cm)</span>
+                <input id="height-input" type="number" min="120" max="230" step="0.1" placeholder="175">
+              </label>
+              <label>
+                <span>Peso attuale (kg)</span>
+                <input id="weight-input" type="number" min="30" max="400" step="0.1" placeholder="74">
+              </label>
+            </div>
+
+            <div class="field-grid">
+              <label>
+                <span>Fattore attivita</span>
+                <select id="activity-select"></select>
+              </label>
+              <div class="hint-card">
+                Scegli il valore che vuoi usare: il fattore numerico e gia visibile nel menu e nel chip sopra.
               </div>
             </div>
-            <div id="bf-navy-block">
-              <div class="field-grid">
-                <label>
-                  <span>Vita / addome (cm)</span>
-                  <input id="waist-input" type="number" min="10" max="250" step="0.1" placeholder="82">
-                </label>
-                <label>
-                  <span>Collo (cm)</span>
-                  <input id="neck-input" type="number" min="10" max="80" step="0.1" placeholder="37">
-                </label>
+
+            <div class="panel inset-panel">
+              <div class="panel-head blocky compact">
+                <div>
+                  <h3>Metodo BF</h3>
+                  <p class="helper">Manuale, Navy oppure stima automatica.</p>
+                </div>
               </div>
               <div class="field-grid">
                 <label>
-                  <span>Fianchi (cm)</span>
-                  <input id="hips-input" type="number" min="10" max="220" step="0.1" placeholder="98">
+                  <span>Metodo</span>
+                  <select id="bf-method-select">
+                    <option value="auto">Automatico</option>
+                    <option value="navy">Navy</option>
+                    <option value="manual">Manuale</option>
+                  </select>
                 </label>
-                <div class="hint-card" id="bf-hint">
-                  Se scegli Navy, la stima usa vita, collo e fianchi quando serve.
+                <div id="bf-manual-block">
+                  <label>
+                    <span>BF manuale %</span>
+                    <input id="body-fat-manual-input" type="number" min="3" max="80" step="0.1" placeholder="18.0">
+                  </label>
+                </div>
+              </div>
+              <div id="bf-navy-block">
+                <div class="field-grid">
+                  <label>
+                    <span>Vita / addome (cm)</span>
+                    <input id="waist-input" type="number" min="10" max="250" step="0.1" placeholder="82">
+                  </label>
+                  <label>
+                    <span>Collo (cm)</span>
+                    <input id="neck-input" type="number" min="10" max="80" step="0.1" placeholder="37">
+                  </label>
+                </div>
+                <div class="field-grid">
+                  <label>
+                    <span>Fianchi (cm)</span>
+                    <input id="hips-input" type="number" min="10" max="220" step="0.1" placeholder="98">
+                  </label>
+                  <div class="hint-card" id="bf-hint">
+                    Se scegli Navy, la stima usa vita, collo e fianchi quando serve.
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="field-grid">
-            <label>
-              <span>Tipo dieta</span>
-              <select id="diet-goal-select"></select>
-            </label>
-            <label>
-              <span>Peso ideale (opzionale)</span>
-              <input id="ideal-weight-input" type="number" min="30" max="400" step="0.1" placeholder="78">
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              <span>Target BF ideale % (opzionale)</span>
-              <input id="target-bf-input" type="number" min="3" max="60" step="0.1" placeholder="12">
-            </label>
-            <label>
-              <span>Preset macro</span>
-              <select id="macro-preset-select"></select>
-            </label>
-          </div>
-
-          <div class="field-grid">
-            <label>
-              <span>Proteine g/kg</span>
-              <input id="protein-input" type="number" min="0.8" max="3.5" step="0.1" placeholder="1.8">
-            </label>
-            <label>
-              <span>Grassi g/kg</span>
-              <input id="fat-input" type="number" min="0.3" max="2.0" step="0.1" placeholder="0.8">
-            </label>
-          </div>
-
-          <label>
-            <span>Nota obiettivo</span>
-            <textarea id="goal-note-input" rows="3" placeholder="Per esempio: voglio arrivare al 12% mantenendo forza e massa magra."></textarea>
-          </label>
-
-          <div class="profile-actions">
-            <button id="calc-save-btn" class="btn primary wide">Genera e salva piano</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="screen-diet" class="screen">
-        <div class="panel">
-          <div class="panel-head blocky">
-            <div>
-              <h3>Piano dieta</h3>
-              <p class="helper">Calorie, macro e tipo dieta.</p>
+            <div class="field-grid">
+              <label>
+                <span>Tipo dieta</span>
+                <select id="diet-goal-select"></select>
+              </label>
+              <label>
+                <span>Peso ideale (opzionale)</span>
+                <input id="ideal-weight-input" type="number" min="30" max="400" step="0.1" placeholder="78">
+              </label>
             </div>
-            <span id="diet-status-chip" class="soft-chip">In attesa</span>
-          </div>
 
-          <div class="macro-grid diet-grid">
-            <article class="metric-card">
-              <span class="mini-label">Proteine</span>
-              <strong id="diet-protein">0 g</strong>
-              <p id="diet-protein-note" class="helper">0 kcal</p>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">Grassi</span>
-              <strong id="diet-fat">0 g</strong>
-              <p id="diet-fat-note" class="helper">0 kcal</p>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">Carboidrati</span>
-              <strong id="diet-carbs">0 g</strong>
-              <p id="diet-carbs-note" class="helper">0 kcal</p>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">Dieta</span>
-              <strong id="diet-goal">Mantenimento</strong>
-              <p id="diet-goal-note" class="helper">0% del TDEE</p>
-            </article>
-          </div>
-
-          <div id="warning-list" class="warning-list"></div>
-        </div>
-      </section>
-
-      <section id="screen-profile" class="screen">
-        <div class="panel profile-panel">
-          <div class="profile-hero">
-            <div class="profile-avatar" id="profile-avatar">FGM</div>
-            <div>
-              <p class="eyebrow">Profilo</p>
-              <h2 id="profile-name">Benvenuto</h2>
-              <p id="profile-email" class="helper">Nessun account caricato</p>
-            </div>
-          </div>
-
-          <div class="macro-grid profile-summary-grid">
-            <article class="metric-card">
-              <span class="mini-label">Peso</span>
-              <strong id="profile-weight">-</strong>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">BF</span>
-              <strong id="profile-bf">-</strong>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">Obiettivo</span>
-              <strong id="profile-target">-</strong>
-            </article>
-            <article class="metric-card">
-              <span class="mini-label">Attività</span>
-              <strong id="profile-activity">-</strong>
-            </article>
-          </div>
-
-          <div class="panel inset-panel">
-            <div class="panel-head blocky compact">
-              <div>
-                <h3>Check-in rapido</h3>
-                <p class="helper">Salva peso e BF attuali per tenere traccia del percorso.</p>
+            <div class="field-grid">
+              <label>
+                <span>Target BF ideale % (opzionale)</span>
+                <input id="target-bf-input" type="number" min="3" max="60" step="0.1" placeholder="12">
+              </label>
+              <div class="hint-card">
+                Le macro vengono calcolate automaticamente in base al tipo dieta selezionato.
               </div>
             </div>
-            <div class="field-grid">
-              <label>
-                <span>Data</span>
-                <input id="checkin-date-input" type="date">
-              </label>
-              <label>
-                <span>Peso (kg)</span>
-                <input id="checkin-weight-input" type="number" min="30" max="400" step="0.1" placeholder="74">
-              </label>
-            </div>
-            <div class="field-grid">
-              <label>
-                <span>BF %</span>
-                <input id="checkin-bf-input" type="number" min="3" max="80" step="0.1" placeholder="17.5">
-              </label>
-              <label>
-                <span>Nota</span>
-                <input id="checkin-note-input" type="text" placeholder="Energia alta, allenamento buono...">
-              </label>
-            </div>
+
+            <label>
+              <span>Nota obiettivo</span>
+              <textarea id="goal-note-input" rows="3" placeholder="Es. Cut leggero mantenendo forza e massa magra."></textarea>
+            </label>
+
             <div class="profile-actions">
-              <button id="save-checkin-btn" class="btn secondary">Salva check-in</button>
-              <button id="export-csv-btn" class="btn accent">Scarica CSV</button>
+              <button id="calc-save-btn" class="btn primary wide">Genera e salva piano</button>
             </div>
-          </div>
+          </article>
 
-          <div class="panel inset-panel">
-            <div class="panel-head blocky compact">
+          <article class="panel">
+            <div class="panel-head blocky">
               <div>
-                <h3>Storico piani</h3>
-                <p class="helper">Gli ultimi piani salvati restano nel tuo account.</p>
+                <h3>Piano dieta</h3>
+                <p class="helper">Kcal e macro seguono il tipo dieta scelto.</p>
               </div>
+              <span id="diet-status-chip" class="soft-chip">In attesa</span>
             </div>
-            <div id="plan-history-list" class="stack-list"></div>
-          </div>
 
-          <div class="panel inset-panel">
-            <div class="panel-head blocky compact">
-              <div>
-                <h3>Check-in recenti</h3>
-                <p class="helper">Peso e BF registrati nel tempo.</p>
-              </div>
+            <div class="macro-grid dashboard-metrics">
+              <article class="metric-card">
+                <span class="mini-label">BF attuale</span>
+                <strong id="metric-bf">0.0%</strong>
+                <p class="helper">Stima del grasso corporeo</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Peso ideale</span>
+                <strong id="metric-ideal-weight">-</strong>
+                <p class="helper">Opzionale</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Calorie target</span>
+                <strong id="metric-calories">0 kcal</strong>
+                <p class="helper">Kcal giornaliere</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Target BF ideale</span>
+                <strong id="metric-target-bf">-</strong>
+                <p class="helper">Opzionale</p>
+              </article>
             </div>
-            <div id="checkin-list" class="stack-list"></div>
-          </div>
 
-          <div class="profile-actions">
-            <button id="logout-btn" class="btn danger">Esci</button>
-          </div>
+            <p id="plan-summary" class="helper plan-summary">Compila il form per generare il piano.</p>
+
+            <div class="macro-grid diet-grid">
+              <article class="metric-card">
+                <span class="mini-label">Proteine</span>
+                <strong id="diet-protein">0 g</strong>
+                <p id="diet-protein-note" class="helper">0 kcal</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Grassi</span>
+                <strong id="diet-fat">0 g</strong>
+                <p id="diet-fat-note" class="helper">0 kcal</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Carboidrati</span>
+                <strong id="diet-carbs">0 g</strong>
+                <p id="diet-carbs-note" class="helper">0 kcal</p>
+              </article>
+              <article class="metric-card">
+                <span class="mini-label">Dieta</span>
+                <strong id="diet-goal">Mantenimento</strong>
+                <p id="diet-goal-note" class="helper">0% del TDEE</p>
+              </article>
+            </div>
+
+            <div id="warning-list" class="warning-list"></div>
+          </article>
         </div>
       </section>
     </main>
-
-    <button id="fab-calc" class="fab" aria-label="Genera piano">+</button>
-
-    <nav class="bottom-nav">
-      <button class="nav-btn active" data-screen="screen-dashboard">Dashboard</button>
-      <button class="nav-btn" data-screen="screen-calc">Calcolo</button>
-      <button class="nav-btn" data-screen="screen-diet">Dieta</button>
-      <button class="nav-btn" data-screen="screen-profile">Profilo</button>
-    </nav>
   </div>
 
   <div id="toast" class="toast hidden"></div>
