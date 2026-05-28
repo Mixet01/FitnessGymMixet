@@ -1,18 +1,26 @@
-# Spese Mixet
+# Fitness Gym Mixet
 
-PWA per tracciare spese ed entrate con:
+PWA mobile per calcolare:
+
+- `BMI`
+- `BMR`
+- `TDEE`
+- `BF` con metodo `Navy` opzionale
+- piano dieta con macro variabili e obiettivi opzionali
+- storico piani e check-in peso/BF
+
+L'app mantiene:
 
 - login Google OAuth
-- database Supabase Postgres
-- categorie personalizzabili per utente
-- dashboard mensile con riepiloghi, trend e breakdown per categoria
-- installazione come app su telefono o desktop
+- persistenza sessione
+- database Supabase/Postgres tramite `DATABASE_URL`
+- fallback locale in `data/fitness_mixet.json` se il DB non e configurato
 
 ## Stack
 
 - backend: Flask
 - auth: Google Identity Services + verifica token lato server
-- database: Supabase Postgres tramite `DATABASE_URL`
+- database: Supabase Postgres
 - frontend: HTML, CSS e JavaScript vanilla
 
 ## Avvio locale
@@ -34,15 +42,13 @@ PWA per tracciare spese ed entrate con:
    Opzionali:
 
    ```powershell
-   $env:PWA_APP_NAME="Spese Mixet"
-   $env:PWA_SHORT_NAME="Mixet"
-   $env:PWA_THEME_COLOR="#1f7a6f"
-   $env:PWA_BG_COLOR="#f7f1e8"
+   $env:PWA_APP_NAME="Fitness Gym Mixet"
+   $env:PWA_SHORT_NAME="Fitness Gym"
+   $env:PWA_THEME_COLOR="#0f4c81"
+   $env:PWA_BG_COLOR="#06111f"
    $env:PWA_ICON_FILE="pwa-icon.png"
    $env:PWA_PORT="8010"
    $env:SPESE_MIXET_SESSION_DAYS="90"
-   $env:ENABLE_BANKING_APP_ID="UUID_APP_ENABLE_BANKING"
-   $env:ENABLE_BANKING_PRIVATE_KEY_PATH="C:\percorso\alla\chiave.pem"
    ```
 
 3. Avvia il server:
@@ -56,152 +62,68 @@ PWA per tracciare spese ed entrate con:
    - locale: `http://127.0.0.1:8010`
    - stessa rete: `http://IP_DEL_PC:8010`
 
-## Configurazione Google OAuth
+## Database
 
-Per il pulsante Google basta creare un client OAuth Web su Google Cloud e aggiungere tra gli `Authorized JavaScript origins` gli URL dove userai l'app, ad esempio:
+Se `DATABASE_URL` e presente, l'app crea automaticamente queste tabelle:
+
+- `app_users`
+- `fitness_profiles`
+- `fitness_plans`
+- `fitness_checkins`
+
+Se `DATABASE_URL` non e impostata, i dati vengono salvati in `data/fitness_mixet.json`.
+
+## Formule usate
+
+- `BMI`: peso / altezza^2
+- `BMR`: formula di Mifflin-St Jeor
+- `TDEE`: BMR moltiplicato per il fattore attivita
+- `BF` automatico: stima da BMI, eta e sesso
+- `BF` opzionale: metodo `Navy` con vita, collo e fianchi
+- piano dieta: mantenimento, cut, cut aggressivo, bulk e bulk aggressivo
+
+## Campi principali
+
+Nella schermata calcolo inserisci:
+
+- sesso
+- eta
+- altezza
+- peso
+- fattore attivita
+- metodo BF
+- tipo dieta
+- peso ideale opzionale
+- target BF opzionale
+- macro preset
+- proteine g/kg
+- grassi g/kg
+
+## Login Google
+
+Per il pulsante Google crea un client OAuth Web su Google Cloud e aggiungi tra gli `Authorized JavaScript origins` gli URL dove userai l'app, ad esempio:
 
 - `http://127.0.0.1:8010`
 - `http://localhost:8010`
-- il dominio del deploy
 
 Lato server serve solo `GOOGLE_CLIENT_ID` per verificare il token ricevuto dal client.
 
-## Configurazione Supabase
-
-1. Crea un progetto su Supabase.
-2. Vai in `Project Settings -> Database`.
-3. Copia la connection string Postgres.
-4. Impostala in `DATABASE_URL`.
-
-All'avvio l'app crea automaticamente queste tabelle:
-
-- `app_users`
-- `expense_categories`
-- `expense_entries`
-
-## Modalita fallback
-
-Se `DATABASE_URL` non e impostata, l'app salva i dati in un file locale `data/spese_mixet.json`. E utile per sviluppo veloce, ma la modalita consigliata resta Supabase.
-
-## Deploy
-
-### Render
-
-- Build command:
-
-  ```text
-  pip install -r requirements.txt
-  ```
-
-- Start command:
-
-  ```text
-  gunicorn spese_mixet:app --bind 0.0.0.0:$PORT
-  ```
-
-Variabili ambiente consigliate:
-
-- `DATABASE_URL`
-- `GOOGLE_CLIENT_ID`
-- `SPESE_MIXET_SECRET`
-- `PWA_APP_NAME`
-- `PWA_SHORT_NAME`
-- `PWA_THEME_COLOR`
-- `PWA_BG_COLOR`
-
-## Funzioni principali
-
-- movimenti di tipo `spesa` o `entrata`
-- categoria opzionale per ogni movimento
-- categorie modificabili e archiviabili
-- insight mensili con saldo, spesa media, categoria top e andamento ultimi 6 mesi
-- export CSV del mese selezionato
-- PWA installabile con cache della shell applicativa
-
 ## Icona personalizzata
 
-Puoi usare una tua icona senza cambiare codice.
-
-Opzione piu semplice:
+Puoi usare una tua icona senza cambiare codice:
 
 1. metti il file dentro `static/`
 2. chiamalo ad esempio `pwa-icon.png`
 3. riavvia l'app
 
-Opzione esplicita con variabile ambiente:
+Oppure imposta:
 
 ```powershell
 $env:PWA_ICON_FILE="mia-icona.png"
 ```
 
-Formati supportati:
+## Note
 
-- `.png`
-- `.jpg`
-- `.jpeg`
-- `.svg`
-
-Se non imposti nulla, l'app prova in automatico questi nomi dentro `static/`:
-
-- `pwa-icon.png`
-- `pwa-icon-512.png`
-- `pwa-icon.jpg`
-- `pwa-icon.jpeg`
-- `pwa-icon.svg`
-- `icon.png`
-- `icon.jpg`
-- `icon.jpeg`
-- `icon.svg`
-
-Se non trova nessun file, usa l'icona SVG generata di default.
-
-## Sync Postepay
-
-Il collegamento automatico con saldo e movimenti Postepay non passa da scraping o login diretto nel sito Poste. La strada corretta e conforme e usare un provider Open Banking / PSD2 autorizzato.
-
-Questa app usa il flusso ufficiale di `Enable Banking` come aggregatore PSD2:
-
-1. crea o attiva un'app in Enable Banking
-2. scarica la chiave privata `.pem`
-3. whitelista l'URL di callback dell'app, ad esempio:
-
-   - `http://127.0.0.1:8010/auth/enable-banking/callback`
-   - `http://localhost:8010/auth/enable-banking/callback`
-
-4. configura almeno queste variabili:
-
-   ```powershell
-   $env:ENABLE_BANKING_APP_ID="UUID_APP_ENABLE_BANKING"
-   $env:ENABLE_BANKING_PRIVATE_KEY_PATH="C:\percorso\alla\chiave.pem"
-   ```
-
-Opzionali:
-
-```powershell
-$env:ENABLE_BANKING_BASE_URL="https://api.enablebanking.com"
-$env:ENABLE_BANKING_COUNTRY="IT"
-$env:ENABLE_BANKING_ASPSP_MATCH="postepay,poste italiane,poste"
-$env:ENABLE_BANKING_CONSENT_DAYS="90"
-$env:ENABLE_BANKING_TX_DAYS="90"
-```
-
-Nell'app trovi poi:
-
-- `Collega Postepay` per aprire il consenso PSD2
-- `Aggiorna saldo` per scaricare saldo e movimenti recenti
-- `Scollega` per rimuovere il collegamento e la cache bancaria locale
-- i movimenti bancari vengono importati automaticamente nei movimenti dell'app
-- i movimenti importati restano senza categoria finche non li assegni tu dall'app
-
-Note pratiche:
-
-- il callback da whitelistare e `http://127.0.0.1:8010/auth/enable-banking/callback`
-- se usi `localhost`, whitelistalo separatamente
-- dopo il collegamento la callback reindirizza subito all'app e la sincronizzazione parte in automatico, cosi non resta bloccata sulla pagina di ritorno
-
-Fonti ufficiali utili:
-
-- Poste Italiane espone BancoPosta e Postepay alle Terze Parti PSD2 tramite CBI Globe
-- la pagina Open Banking di Poste indica che una Terza Parte autorizzata puo accedere alle informazioni di Conto BancoPosta e Carta Postepay previo consenso
-
-Una strada concreta da valutare e un provider come Enable Banking, che nel changelog dell'8 aprile 2026 dichiara supporto per Poste Italiane / Postepay su account personali e business.
+- il layout e pensato per mobile
+- il profilo salva storico piani e check-in
+- il bottone `Scarica CSV` esporta lo storico dei piani
