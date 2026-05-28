@@ -1,74 +1,38 @@
 (function () {
   const state = {
     me: null,
+    activityLevels: [],
+    dietGoals: [],
+    macroPresets: [],
+    profile: {},
+    latestPlan: null,
+    plans: [],
+    checkins: [],
     activeScreen: "screen-dashboard",
-    month: "",
-    monthLabel: "",
-    storageMode: "database",
-    categories: [],
-    entries: [],
-    summary: {
-      expense_total: 0,
-      income_total: 0,
-      balance: 0,
-      top_category: null,
-      category_totals: [],
-    },
-    profileMode: "month",
-    profileCycleDay: 25,
-    profilePeriod: {
-      label: "",
-      mode: "month",
-      start_date: "",
-      end_date: "",
-      cycle_day: 25,
-    },
-    profileSummary: {
-      expense_total: 0,
-      income_total: 0,
-      balance: 0,
-      transaction_count: 0,
-      average_expense: 0,
-      average_income: 0,
-      daily_expense: 0,
-      active_days: 0,
-      savings_rate: null,
-      period_days: 0,
-      top_category: null,
-      category_totals: [],
-      biggest_expense: null,
-      expense_count: 0,
-      income_count: 0,
-    },
-    filterType: "all",
-    search: "",
-    editingEntryId: null,
-    editingCategoryId: null,
-    bank: {
-      configured: false,
-      connected: false,
-      aspsp_name: "Postepay Evolution",
-      account_name: "",
-      account_iban: "",
-      currency: "EUR",
-      current_balance: null,
-      available_balance: null,
-      booked_balance: null,
-      balance_label: "",
-      last_sync_at: "",
-      transaction_count: 0,
-      transactions: [],
-      access_valid_until: "",
-      pending_category_count: 0,
-      auto_sync_minutes: 30,
-      last_error: "",
-    },
-    bankFlash: null,
-    bankAutoSyncRequested: false,
-    bankSyncInFlight: false,
-    bankAutoSyncDone: false,
-    lastStateFetchAt: 0,
+    preview: null,
+    googleInitialized: false,
     refreshPromise: null,
+    toastTimer: null,
+  };
+
+  const defaultDraft = {
+    sex: "male",
+    age_years: "30",
+    height_cm: "175",
+    weight_kg: "74",
+    activity_key: "moderate",
+    bf_method: "auto",
+    body_fat_manual: "",
+    waist_cm: "",
+    neck_cm: "",
+    hips_cm: "",
+    diet_goal: "maintenance",
+    ideal_weight_kg: "",
+    target_body_fat_percent: "",
+    macro_preset: "balanced",
+    protein_g_per_kg: "1.8",
+    fat_g_per_kg: "0.8",
+    goal_note: "",
   };
 
   const els = {
@@ -80,88 +44,82 @@
     devName: document.getElementById("dev-name"),
     devEmail: document.getElementById("dev-email"),
     devLogin: document.getElementById("dev-login"),
-    monthInput: document.getElementById("month-input"),
-    monthPrev: document.getElementById("month-prev"),
-    monthNext: document.getElementById("month-next"),
-    monthLabel: document.getElementById("month-label"),
-    monthCaption: document.getElementById("month-caption"),
     welcomeName: document.getElementById("welcome-name"),
-    metricBalance: document.getElementById("metric-balance"),
-    metricBalanceNote: document.getElementById("metric-balance-note"),
-    metricExpense: document.getElementById("metric-expense"),
-    metricIncome: document.getElementById("metric-income"),
-    topCategoryTag: document.getElementById("top-category-tag"),
-    categoryBars: document.getElementById("category-bars"),
-    movementList: document.getElementById("movement-list"),
-    categoryGrid: document.getElementById("category-grid"),
-    searchInput: document.getElementById("search-input"),
-    filterButtons: Array.from(document.querySelectorAll("[data-filter-type]")),
-    navButtons: Array.from(document.querySelectorAll(".nav-btn")),
-    screens: Array.from(document.querySelectorAll(".screen")),
-    headerAddEntry: document.getElementById("header-add-entry"),
-    movementsAddEntry: document.getElementById("movements-add-entry"),
-    fabEntry: document.getElementById("fab-entry"),
-    addCategory: document.getElementById("add-category"),
-    quickCategoryName: document.getElementById("category-quick-name"),
-    quickCategoryColor: document.getElementById("category-quick-color"),
-    saveQuickCategory: document.getElementById("save-quick-category"),
-    exportCsv: document.getElementById("export-csv"),
-    logoutBtn: document.getElementById("logout-btn"),
+    headerSubtitle: document.getElementById("header-subtitle"),
+    syncChip: document.getElementById("sync-chip"),
+    generateFromHeader: document.getElementById("generate-from-header"),
+    calcSaveBtn: document.getElementById("calc-save-btn"),
+    metricBmi: document.getElementById("metric-bmi"),
+    metricBmiNote: document.getElementById("metric-bmi-note"),
+    metricBmr: document.getElementById("metric-bmr"),
+    metricTdee: document.getElementById("metric-tdee"),
+    metricBf: document.getElementById("metric-bf"),
+    metricIdealWeight: document.getElementById("metric-ideal-weight"),
+    metricCalories: document.getElementById("metric-calories"),
+    metricTargetBf: document.getElementById("metric-target-bf"),
+    bfMethodChip: document.getElementById("bf-method-chip"),
+    planSummary: document.getElementById("plan-summary"),
+    activityChip: document.getElementById("activity-chip"),
+    dietStatusChip: document.getElementById("diet-status-chip"),
+    dietProtein: document.getElementById("diet-protein"),
+    dietProteinNote: document.getElementById("diet-protein-note"),
+    dietFat: document.getElementById("diet-fat"),
+    dietFatNote: document.getElementById("diet-fat-note"),
+    dietCarbs: document.getElementById("diet-carbs"),
+    dietCarbsNote: document.getElementById("diet-carbs-note"),
+    dietGoal: document.getElementById("diet-goal"),
+    dietGoalNote: document.getElementById("diet-goal-note"),
+    warningList: document.getElementById("warning-list"),
+    profileAvatar: document.getElementById("profile-avatar"),
     profileName: document.getElementById("profile-name"),
     profileEmail: document.getElementById("profile-email"),
-    profileAvatar: document.getElementById("profile-avatar"),
-    profileModeButtons: Array.from(document.querySelectorAll("[data-profile-mode]")),
-    profileCycleDay: document.getElementById("profile-cycle-day"),
-    profilePeriodLabel: document.getElementById("profile-period-label"),
-    profileBalance: document.getElementById("profile-balance"),
-    profileExpenseTotal: document.getElementById("profile-expense-total"),
-    profileIncomeTotal: document.getElementById("profile-income-total"),
-    profileCount: document.getElementById("profile-count"),
-    profileAverage: document.getElementById("profile-average"),
-    profileDaily: document.getElementById("profile-daily"),
-    profileDays: document.getElementById("profile-days"),
-    profileSavingRate: document.getElementById("profile-saving-rate"),
-    profileBreakdown: document.getElementById("profile-breakdown"),
-    bankStatusText: document.getElementById("bank-status-text"),
-    bankSyncChip: document.getElementById("bank-sync-chip"),
-    bankBalance: document.getElementById("bank-balance"),
-    bankAccountName: document.getElementById("bank-account-name"),
-    bankIban: document.getElementById("bank-iban"),
-    bankValidUntil: document.getElementById("bank-valid-until"),
-    bankMessage: document.getElementById("bank-message"),
-    bankConnect: document.getElementById("bank-connect"),
-    bankSync: document.getElementById("bank-sync"),
-    bankDisconnect: document.getElementById("bank-disconnect"),
-    bankTransactionList: document.getElementById("bank-transaction-list"),
-    entryModal: document.getElementById("entry-modal"),
-    entryModalTitle: document.getElementById("entry-modal-title"),
-    closeEntryModal: document.getElementById("close-entry-modal"),
-    entryType: document.getElementById("entry-type"),
-    entryDate: document.getElementById("entry-date"),
-    entryTitle: document.getElementById("entry-title"),
-    entryAmount: document.getElementById("entry-amount"),
-    entryCategory: document.getElementById("entry-category"),
-    entryNotes: document.getElementById("entry-notes"),
-    saveEntry: document.getElementById("save-entry"),
-    deleteEntry: document.getElementById("delete-entry"),
-    categoryModal: document.getElementById("category-modal"),
-    categoryModalTitle: document.getElementById("category-modal-title"),
-    closeCategoryModal: document.getElementById("close-category-modal"),
-    categoryName: document.getElementById("category-name"),
-    categoryColor: document.getElementById("category-color"),
-    categoryArchived: document.getElementById("category-archived"),
-    saveCategory: document.getElementById("save-category"),
-    deleteCategory: document.getElementById("delete-category"),
+    profileWeight: document.getElementById("profile-weight"),
+    profileBf: document.getElementById("profile-bf"),
+    profileTarget: document.getElementById("profile-target"),
+    profileActivity: document.getElementById("profile-activity"),
+    checkinDateInput: document.getElementById("checkin-date-input"),
+    checkinWeightInput: document.getElementById("checkin-weight-input"),
+    checkinBfInput: document.getElementById("checkin-bf-input"),
+    checkinNoteInput: document.getElementById("checkin-note-input"),
+    saveCheckinBtn: document.getElementById("save-checkin-btn"),
+    exportCsvBtn: document.getElementById("export-csv-btn"),
+    logoutBtn: document.getElementById("logout-btn"),
+    planHistoryList: document.getElementById("plan-history-list"),
+    checkinList: document.getElementById("checkin-list"),
+    bfHint: document.getElementById("bf-hint"),
+    bfManualBlock: document.getElementById("bf-manual-block"),
+    bfNavyBlock: document.getElementById("bf-navy-block"),
+    activitySelect: document.getElementById("activity-select"),
+    dietGoalSelect: document.getElementById("diet-goal-select"),
+    bfMethodSelect: document.getElementById("bf-method-select"),
+    bodyFatManualInput: document.getElementById("body-fat-manual-input"),
+    waistInput: document.getElementById("waist-input"),
+    neckInput: document.getElementById("neck-input"),
+    hipsInput: document.getElementById("hips-input"),
+    targetBfInput: document.getElementById("target-bf-input"),
+    idealWeightInput: document.getElementById("ideal-weight-input"),
+    macroPresetSelect: document.getElementById("macro-preset-select"),
+    proteinInput: document.getElementById("protein-input"),
+    fatInput: document.getElementById("fat-input"),
+    goalNoteInput: document.getElementById("goal-note-input"),
+    sexSelect: document.getElementById("sex-select"),
+    ageInput: document.getElementById("age-input"),
+    heightInput: document.getElementById("height-input"),
+    weightInput: document.getElementById("weight-input"),
+    navButtons: Array.from(document.querySelectorAll(".nav-btn")),
+    screens: Array.from(document.querySelectorAll(".screen")),
+    fabCalc: document.getElementById("fab-calc"),
+    toast: document.getElementById("toast"),
   };
 
   const googleClientId = (els.body.dataset.googleClientId || "").trim();
-  const appName = (els.body.dataset.pwaAppName || "Spese Mixet").trim();
-  const assetVersion = (els.body.dataset.assetVersion || "2026-05-23-v7").trim();
-  const currencyFormatter = new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" });
-  const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" });
-  const monthFormatter = new Intl.DateTimeFormat("it-IT", { month: "long", year: "numeric" });
+  const appName = (els.body.dataset.pwaAppName || "Fitness Gym Mixet").trim();
+  const assetVersion = (els.body.dataset.assetVersion || "2026-05-28-fit-2").trim();
+  const currencyFormatter = new Intl.NumberFormat("it-IT", { maximumFractionDigits: 0 });
+  const oneDecimalFormatter = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const twoDecimalFormatter = new Intl.NumberFormat("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const shortDateFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" });
   const dateTimeFormatter = new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  let googleInitialized = false;
 
   function escapeHtml(value) {
     return String(value || "")
@@ -172,69 +130,82 @@
       .replaceAll("'", "&#39;");
   }
 
-  function formatMoney(value) {
-    return currencyFormatter.format(Number(value || 0));
+  function formatNumber(value, decimals = 1) {
+    const num = Number(value || 0);
+    if (decimals === 0) return currencyFormatter.format(num);
+    if (decimals === 2) return twoDecimalFormatter.format(num);
+    return oneDecimalFormatter.format(num);
   }
 
-  function formatShortDate(value) {
+  function formatWeight(value) { return `${formatNumber(value, 1)} kg`; }
+  function formatPercent(value) { return `${formatNumber(value, 1)}%`; }
+  function formatCalories(value) { return `${formatNumber(value, 0)} kcal`; }
+
+  function formatDate(value) {
+    if (!value) return "-";
     const dateObj = new Date(`${value}T12:00:00`);
-    if (Number.isNaN(dateObj.getTime())) return value || "";
-    return shortDateFormatter.format(dateObj).replace(".", "");
+    if (Number.isNaN(dateObj.getTime())) return String(value);
+    return shortDateFormatter.format(dateObj);
   }
 
   function formatDateTime(value) {
     if (!value) return "-";
-    const normalized = String(value).includes("T") ? String(value).replace(" ", "T") : `${value}T00:00:00`;
+    const normalized = String(value).includes("T") ? value : `${value}T00:00:00`;
     const dateObj = new Date(normalized);
     if (Number.isNaN(dateObj.getTime())) return String(value);
     return dateTimeFormatter.format(dateObj);
   }
 
-  function formatAccessDate(value) {
-    if (!value) return "Accesso non attivo";
-    return `Accesso valido fino al ${formatDateTime(value)}`;
-  }
-
   function avatarText(user) {
     const base = String((user && (user.name || user.email)) || appName).trim();
-    return base.slice(0, 2).toUpperCase();
+    const cleaned = base.replace(/[^A-Za-z0-9 ]/g, " ").trim();
+    const initials = cleaned
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .join("");
+    return (initials.slice(0, 3) || cleaned.slice(0, 2) || "FG").toUpperCase();
   }
 
-  async function api(url, options = {}) {
-    const timeoutMs = Number(options.timeoutMs || 0);
+  function api(url, options = {}) {
+    const timeoutMs = Number(options.timeoutMs || 12000);
     const fetchOptions = { ...options, cache: "no-store" };
     delete fetchOptions.timeoutMs;
-    let timeoutId = null;
-    if (timeoutMs > 0) {
-      const controller = new AbortController();
-      fetchOptions.signal = controller.signal;
-      timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
-    }
-    let response;
-    try {
-      response = await fetch(url, fetchOptions);
-    } catch (err) {
-      if (timeoutId) window.clearTimeout(timeoutId);
-      if (err && err.name === "AbortError") {
-        throw new Error("La richiesta ha impiegato troppo tempo. Riprova tra poco.");
-      }
-      throw err;
-    }
-    if (timeoutId) window.clearTimeout(timeoutId);
-    let data = null;
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      data = await response.json();
-    }
-    if (!response.ok) {
-      if (response.status === 401) {
-        state.me = null;
-        showGate("auth");
-        initGoogleSignIn();
-      }
-      throw new Error((data && data.message) || "Operazione non riuscita.");
-    }
-    return data;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    fetchOptions.signal = controller.signal;
+    return fetch(url, fetchOptions)
+      .then(async (response) => {
+        window.clearTimeout(timeoutId);
+        let data = null;
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) data = await response.json();
+        if (!response.ok) {
+          if (response.status === 401) {
+            state.me = null;
+            showGate("auth");
+            initGoogleSignIn();
+          }
+          throw new Error((data && data.message) || "Operazione non riuscita.");
+        }
+        return data;
+      })
+      .catch((err) => {
+        window.clearTimeout(timeoutId);
+        if (err && err.name === "AbortError") {
+          throw new Error("La richiesta ha impiegato troppo tempo. Riprova tra poco.");
+        }
+        throw err;
+      });
+  }
+
+  function showToast(message, tone = "info") {
+    if (!els.toast) return;
+    clearTimeout(state.toastTimer);
+    els.toast.textContent = message;
+    els.toast.classList.remove("hidden", "success", "warn", "danger");
+    els.toast.classList.add(tone);
+    state.toastTimer = window.setTimeout(() => els.toast.classList.add("hidden"), 3200);
   }
 
   function showGate(mode) {
@@ -242,9 +213,7 @@
     els.appShell.classList.toggle("hidden", mode !== "app");
   }
 
-  function hideBootSplash() {
-    els.bootSplash.classList.add("hidden");
-  }
+  function hideBootSplash() { els.bootSplash.classList.add("hidden"); }
 
   function setActiveScreen(screenId) {
     state.activeScreen = screenId;
@@ -252,539 +221,783 @@
     els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.screen === screenId));
   }
 
-  function consumeBankFlashFromUrl() {
-    const url = new URL(window.location.href);
-    const status = (url.searchParams.get("bank_status") || "").trim();
-    const message = (url.searchParams.get("bank_message") || "").trim();
-    const autoSync = (url.searchParams.get("bank_autosync") || "").trim() === "1";
-    if (status || message) {
-      state.bankFlash = { status: status || "info", message };
-      setActiveScreen("screen-profile");
+  function persistDraft() {
+    localStorage.setItem("fitness-gym-mixet-draft", JSON.stringify(readFormDraft()));
+  }
+
+  function loadDraft() {
+    try {
+      const raw = localStorage.getItem("fitness-gym-mixet-draft") || localStorage.getItem("fit-mixet-draft");
+      if (!raw) return { ...defaultDraft };
+      return { ...defaultDraft, ...JSON.parse(raw) };
+    } catch (_) {
+      return { ...defaultDraft };
     }
-    if (autoSync) {
-      state.bankAutoSyncRequested = true;
-      setActiveScreen("screen-profile");
+  }
+
+  function profileToDraft(profile) {
+    if (!profile || typeof profile !== "object") return {};
+    return {
+      sex: profile.sex || defaultDraft.sex,
+      age_years: profile.age_years != null ? String(profile.age_years) : defaultDraft.age_years,
+      height_cm: profile.height_cm != null ? String(profile.height_cm) : defaultDraft.height_cm,
+      weight_kg: profile.weight_kg != null ? String(profile.weight_kg) : defaultDraft.weight_kg,
+      activity_key: profile.activity_key || defaultDraft.activity_key,
+      bf_method: profile.bf_method || defaultDraft.bf_method,
+      body_fat_manual: profile.body_fat_manual != null ? String(profile.body_fat_manual) : defaultDraft.body_fat_manual,
+      waist_cm: profile.waist_cm != null ? String(profile.waist_cm) : defaultDraft.waist_cm,
+      neck_cm: profile.neck_cm != null ? String(profile.neck_cm) : defaultDraft.neck_cm,
+      hips_cm: profile.hips_cm != null ? String(profile.hips_cm) : defaultDraft.hips_cm,
+      diet_goal: profile.diet_goal || defaultDraft.diet_goal,
+      ideal_weight_kg: profile.ideal_weight_kg != null ? String(profile.ideal_weight_kg) : defaultDraft.ideal_weight_kg,
+      target_body_fat_percent: profile.target_body_fat_percent != null ? String(profile.target_body_fat_percent) : defaultDraft.target_body_fat_percent,
+      macro_preset: profile.macro_preset || defaultDraft.macro_preset,
+      protein_g_per_kg: profile.protein_g_per_kg != null ? String(profile.protein_g_per_kg) : defaultDraft.protein_g_per_kg,
+      fat_g_per_kg: profile.fat_g_per_kg != null ? String(profile.fat_g_per_kg) : defaultDraft.fat_g_per_kg,
+      goal_note: profile.goal_note || defaultDraft.goal_note,
+    };
+  }
+
+  function readFormDraft() {
+    return {
+      sex: els.sexSelect.value,
+      age_years: els.ageInput.value.trim(),
+      height_cm: els.heightInput.value.trim(),
+      weight_kg: els.weightInput.value.trim(),
+      activity_key: els.activitySelect.value,
+      bf_method: els.bfMethodSelect.value,
+      body_fat_manual: els.bodyFatManualInput.value.trim(),
+      waist_cm: els.waistInput.value.trim(),
+      neck_cm: els.neckInput.value.trim(),
+      hips_cm: els.hipsInput.value.trim(),
+      diet_goal: els.dietGoalSelect.value,
+      ideal_weight_kg: els.idealWeightInput.value.trim(),
+      target_body_fat_percent: els.targetBfInput.value.trim(),
+      macro_preset: els.macroPresetSelect.value,
+      protein_g_per_kg: els.proteinInput.value.trim(),
+      fat_g_per_kg: els.fatInput.value.trim(),
+      goal_note: els.goalNoteInput.value.trim(),
+    };
+  }
+
+  function applyDraftToForm(draft) {
+    const data = { ...defaultDraft, ...draft };
+    els.sexSelect.value = data.sex || "male";
+    els.ageInput.value = data.age_years || "";
+    els.heightInput.value = data.height_cm || "";
+    els.weightInput.value = data.weight_kg || "";
+    els.activitySelect.value = data.activity_key || "moderate";
+    els.bfMethodSelect.value = data.bf_method || "auto";
+    els.bodyFatManualInput.value = data.body_fat_manual || "";
+    els.waistInput.value = data.waist_cm || "";
+    els.neckInput.value = data.neck_cm || "";
+    els.hipsInput.value = data.hips_cm || "";
+    els.dietGoalSelect.value = data.diet_goal || "maintenance";
+    els.idealWeightInput.value = data.ideal_weight_kg || "";
+    els.targetBfInput.value = data.target_body_fat_percent || "";
+    els.macroPresetSelect.value = data.macro_preset || "balanced";
+    els.proteinInput.value = data.protein_g_per_kg || "";
+    els.fatInput.value = data.fat_g_per_kg || "";
+    els.goalNoteInput.value = data.goal_note || "";
+    updateBfVisibility();
+    updateActivityChip();
+  }
+
+  function populateSelect(select, items, getter, labeler = null) {
+    select.innerHTML = items.map((item) => {
+      const value = getter(item);
+      const label = labeler ? labeler(item, value) : item.label || item.name || value;
+      return `<option value="${escapeHtml(String(value))}">${escapeHtml(label)}</option>`;
+    }).join("");
+  }
+
+  function updateActivitySelect() {
+    populateSelect(
+      els.activitySelect,
+      state.activityLevels,
+      (item) => item.key,
+      (item) => `${item.label} (${item.factor.toFixed(3)})`
+    );
+    const current = state.profile.activity_key || loadDraft().activity_key || "moderate";
+    els.activitySelect.value = current;
+  }
+
+  function updateDietGoalSelect() {
+    populateSelect(
+      els.dietGoalSelect,
+      state.dietGoals,
+      (item) => item.key,
+      (item) => `${item.label} (${item.adjustment_percent > 0 ? "+" : ""}${item.adjustment_percent}%)`
+    );
+    const current = state.profile.diet_goal || loadDraft().diet_goal || "maintenance";
+    els.dietGoalSelect.value = current;
+  }
+
+  function updateMacroPresetSelect() {
+    populateSelect(els.macroPresetSelect, state.macroPresets, (item) => item.key);
+    const current = state.profile.macro_preset || loadDraft().macro_preset || "balanced";
+    els.macroPresetSelect.value = current;
+  }
+
+  function updateMacroPresetFields(force = true) {
+    const preset = state.macroPresets.find((item) => item.key === els.macroPresetSelect.value) || state.macroPresets[0];
+    if (!preset) return;
+    if (force || !els.proteinInput.value.trim()) els.proteinInput.value = preset.protein_g_per_kg;
+    if (force || !els.fatInput.value.trim()) els.fatInput.value = preset.fat_g_per_kg;
+  }
+
+  function updateActivityChip() {
+    const selected = state.activityLevels.find((item) => item.key === els.activitySelect.value) || state.activityLevels[2];
+    if (!selected) return;
+    els.activityChip.textContent = `Attività: ${selected.label} (${selected.factor.toFixed(3)})`;
+  }
+
+  function updateBfVisibility() {
+    const mode = els.bfMethodSelect.value;
+    els.bfManualBlock.classList.toggle("hidden", mode !== "manual");
+    els.bfNavyBlock.classList.toggle("hidden", mode === "manual");
+    if (mode === "navy") {
+      els.bfHint.textContent = "Per Navy servono vita, collo e, per le donne, anche i fianchi.";
+    } else if (mode === "manual") {
+      els.bfHint.textContent = "Inserisci il tuo BF attuale e l'app userà quel valore.";
+    } else {
+      els.bfHint.textContent = "Automatico usa Navy se hai le misure, altrimenti una stima BMI.";
     }
-    if (!status && !message && !autoSync) return;
-    url.searchParams.delete("bank_status");
-    url.searchParams.delete("bank_message");
-    url.searchParams.delete("bank_autosync");
-    const cleanUrl = `${url.pathname}${url.searchParams.toString() ? `?${url.searchParams.toString()}` : ""}${url.hash || ""}`;
-    window.history.replaceState({}, "", cleanUrl);
   }
 
-  function setMonthValue(monthValue) {
-    state.month = monthValue;
-    els.monthInput.value = monthValue;
-    const [year, month] = monthValue.split("-");
-    const dateObj = new Date(Number(year), Number(month) - 1, 1);
-    els.monthLabel.textContent = monthFormatter.format(dateObj);
+  function bmiCategory(value) {
+    if (value < 18.5) return "Sottopeso";
+    if (value < 25) return "Normale";
+    if (value < 30) return "Sovrappeso";
+    return "Obesita";
   }
 
-  function shiftMonth(step) {
-    const [yearRaw, monthRaw] = state.month.split("-");
-    const dateObj = new Date(Number(yearRaw), Number(monthRaw) - 1, 1);
-    dateObj.setMonth(dateObj.getMonth() + step);
-    const nextValue = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, "0")}`;
-    setMonthValue(nextValue);
-    refreshState().catch((err) => alert(err.message));
+  function parseNum(value) {
+    const raw = String(value ?? "").trim().replace(",", ".");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
-  function renderCategoryOptions(selectedId) {
-    const options = ['<option value="">Senza categoria</option>'];
-    state.categories.forEach((category) => {
-      if (category.archived) return;
-      options.push(
-        `<option value="${category.id}" ${Number(selectedId || 0) === Number(category.id) ? "selected" : ""}>${escapeHtml(category.name)}</option>`
-      );
-    });
-    els.entryCategory.innerHTML = options.join("");
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 
-  function resetQuickCategoryForm() {
-    els.quickCategoryName.value = "";
-    els.quickCategoryColor.value = "#1f7a6f";
+  function computeLocalPlan(input) {
+    const sex = String(input.sex || "").trim().toLowerCase();
+    const ageYears = clamp(parseNum(input.age_years) ?? 0, 14, 99);
+    const heightCm = clamp(parseNum(input.height_cm) ?? 0, 120, 230);
+    const weightKg = clamp(parseNum(input.weight_kg) ?? 0, 30, 400);
+    const targetBf = clamp(parseNum(input.target_body_fat_percent) ?? 0, 3, 60);
+    const targetWeeks = clamp(Math.round(parseNum(input.target_weeks) ?? 0), 1, 156);
+    const mealsPerDay = clamp(Math.round(parseNum(input.meals_per_day) ?? 4), 2, 8);
+    const activityItem = state.activityLevels.find((item) => item.key === input.activity_key) || state.activityLevels[2] || { key: "moderate", label: "Moderato", factor: 1.55 };
+    const activityFactor = clamp(parseNum(input.activity_factor) ?? activityItem.factor, 1.1, 2.5);
+    const preset = state.macroPresets.find((item) => item.key === input.macro_preset) || state.macroPresets[0] || { key: "balanced", label: "Bilanciata", protein_g_per_kg: 1.8, fat_g_per_kg: 0.8 };
+    const proteinFactor = clamp(parseNum(input.protein_g_per_kg) ?? preset.protein_g_per_kg, 0.8, 3.5);
+    const fatFactor = clamp(parseNum(input.fat_g_per_kg) ?? preset.fat_g_per_kg, 0.3, 2.0);
+    const bfMethod = String(input.bf_method || "auto").trim().toLowerCase();
+    const manualBf = parseNum(input.body_fat_manual);
+    const waist = parseNum(input.waist_cm);
+    const neck = parseNum(input.neck_cm);
+    const hips = parseNum(input.hips_cm);
+    const canNavy = sex && waist != null && neck != null && (sex === "male" || hips != null);
+
+    if (!sex || !ageYears || !heightCm || !weightKg || !targetWeeks || !targetBf) {
+      return { ready: false, warnings: [] };
+    }
+
+    let bodyFatPercent;
+    let bodyFatMethod;
+    let bodyFatLabel;
+    let bodyFatDetails;
+
+    if (bfMethod === "manual") {
+      if (manualBf == null) return { ready: false, warnings: ["Inserisci la BF manuale."] };
+      bodyFatPercent = clamp(manualBf, 3, 80);
+      bodyFatMethod = "manuale";
+      bodyFatLabel = "BF manuale";
+      bodyFatDetails = "Valore inserito manualmente.";
+    } else if (bfMethod === "navy" || (bfMethod === "auto" && canNavy)) {
+      if (!canNavy) return { ready: false, warnings: ["Completa i campi Navy per calcolare la BF."] };
+      const heightIn = heightCm / 2.54;
+      const waistIn = waist / 2.54;
+      const neckIn = neck / 2.54;
+      if (sex === "male") {
+        const diff = waistIn - neckIn;
+        if (diff <= 0) return { ready: false, warnings: ["Le misure Navy non sono coerenti."] };
+        bodyFatPercent = 86.01 * Math.log10(diff) - 70.041 * Math.log10(heightIn) + 36.76;
+      } else {
+        const hipIn = hips / 2.54;
+        const diff = waistIn + hipIn - neckIn;
+        if (diff <= 0) return { ready: false, warnings: ["Le misure Navy non sono coerenti."] };
+        bodyFatPercent = 163.205 * Math.log10(diff) - 97.684 * Math.log10(heightIn) - 78.387;
+      }
+      bodyFatMethod = "navy";
+      bodyFatLabel = "Metodo Navy";
+      bodyFatDetails = "Stima da circonferenze.";
+    } else {
+      const bmi = weightKg / Math.pow(heightCm / 100, 2);
+      const sexFlag = sex === "male" ? 1 : 0;
+      bodyFatPercent = 1.2 * bmi + 0.23 * ageYears - 10.8 * sexFlag - 5.4;
+      bodyFatMethod = "estimate";
+      bodyFatLabel = "Stima BMI";
+      bodyFatDetails = "Stima automatica basata su BMI, età e sesso.";
+    }
+
+    bodyFatPercent = clamp(bodyFatPercent, 3, 80);
+    const bmi = weightKg / Math.pow(heightCm / 100, 2);
+    const bmr = sex === "male" ? 10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5 : 10 * weightKg + 6.25 * heightCm - 5 * ageYears - 161;
+    const tdee = bmr * activityFactor;
+    const leanMass = weightKg * (1 - bodyFatPercent / 100);
+    const fatMass = weightKg - leanMass;
+    const targetWeight = leanMass / (1 - targetBf / 100);
+    const weightDelta = targetWeight - weightKg;
+    const dailyDelta = Math.abs(weightDelta) * 7700 / (targetWeeks * 7);
+    let calorieTarget = tdee;
+    let direction = "mantenimento";
+    if (Math.abs(weightDelta) >= 0.05) {
+      direction = weightDelta < 0 ? "deficit" : "surplus";
+      calorieTarget = weightDelta < 0 ? tdee - dailyDelta : tdee + dailyDelta;
+    }
+    calorieTarget = Math.max(0, calorieTarget);
+    const weeklyChangeKg = weightDelta / targetWeeks;
+    const weeklyChangePct = Math.abs(weeklyChangeKg) / weightKg * 100;
+    const proteinG = proteinFactor * (direction === "deficit" ? leanMass : weightKg);
+    const fatG = fatFactor * weightKg;
+    const proteinKcal = proteinG * 4;
+    const fatKcal = fatG * 9;
+    let carbsKcal = calorieTarget - proteinKcal - fatKcal;
+    let carbsG = carbsKcal > 0 ? carbsKcal / 4 : 0;
+    if (carbsKcal < 0) {
+      carbsKcal = 0;
+      carbsG = 0;
+    }
+    const mealCalories = calorieTarget / mealsPerDay;
+    const mealProtein = proteinG / mealsPerDay;
+    const mealFat = fatG / mealsPerDay;
+    const mealCarbs = carbsG / mealsPerDay;
+
+    const warnings = [];
+    if (dailyDelta > tdee * 0.25) warnings.push("Il deficit/surplus richiesto e molto aggressivo.");
+    if (calorieTarget < (sex === "male" ? 1500 : 1200)) warnings.push("Le calorie stimate scendono molto in basso: valuta piu tempo o un target BF meno spinto.");
+    if (weeklyChangePct > 1.25) warnings.push("La velocita settimanale stimata e alta.");
+    if (bodyFatMethod === "estimate") warnings.push("La BF e stimata dal BMI: se puoi, inserisci le circonferenze o un valore manuale.");
+
+    return {
+      ready: true,
+      inputs: {
+        sex,
+        age_years: ageYears,
+        height_cm: heightCm,
+        weight_kg: weightKg,
+        activity_key: activityItem.key,
+        activity_label: activityItem.label,
+        activity_factor: activityFactor,
+        bf_method: bfMethod,
+        body_fat_manual: manualBf,
+        waist_cm: waist,
+        neck_cm: neck,
+        hips_cm: hips,
+        target_body_fat_percent: targetBf,
+        target_weeks: targetWeeks,
+        meals_per_day: mealsPerDay,
+        macro_preset: preset.key,
+        protein_g_per_kg: proteinFactor,
+        fat_g_per_kg: fatFactor,
+        goal_note: input.goal_note || "",
+      },
+      metrics: {
+        bmi,
+        bmi_category: bmiCategory(bmi),
+        bmr,
+        tdee,
+        body_fat_percent: bodyFatPercent,
+        body_fat_method: bodyFatMethod,
+        body_fat_label: bodyFatLabel,
+        body_fat_details: bodyFatDetails,
+        lean_mass_kg: leanMass,
+        fat_mass_kg: fatMass,
+        target_weight_kg: targetWeight,
+        weight_delta_kg: weightDelta,
+        weekly_change_kg: weeklyChangeKg,
+        weekly_change_percent: weeklyChangePct,
+        daily_calorie_delta: dailyDelta,
+        calorie_target: calorieTarget,
+        direction,
+      },
+      macros: {
+        preset,
+        protein_g: proteinG,
+        protein_kcal: proteinKcal,
+        fat_g: fatG,
+        fat_kcal: fatKcal,
+        carbs_g: carbsG,
+        carbs_kcal: carbsKcal,
+        meals_per_day: mealsPerDay,
+        per_meal: {
+          calories: mealCalories,
+          protein_g: mealProtein,
+          fat_g: mealFat,
+          carbs_g: mealCarbs,
+        },
+      },
+      warnings,
+      summary: `Obiettivo: arrivare al ${formatPercent(targetBf)} in ${targetWeeks} settimane con ${formatCalories(calorieTarget)}.`,
+    };
   }
 
-  function openEntryModal(entry) {
-    state.editingEntryId = entry ? entry.id : null;
-    els.entryModalTitle.textContent = entry ? "Modifica movimento" : "Nuovo movimento";
-    els.deleteEntry.classList.toggle("hidden", !entry);
-    els.entryType.value = entry ? entry.entry_type : "expense";
-    els.entryDate.value = entry ? entry.occurred_on : (els.body.dataset.today || "");
-    els.entryTitle.value = entry ? entry.title : "";
-    els.entryAmount.value = entry ? Number(entry.amount).toFixed(2) : "";
-    renderCategoryOptions(entry && entry.category ? entry.category.id : null);
-    els.entryNotes.value = entry ? entry.notes : "";
-    els.entryModal.classList.remove("hidden");
+  function computeLocalPlan(input) {
+    const sex = String(input.sex || "").trim().toLowerCase();
+    const ageYears = clamp(parseNum(input.age_years) ?? 0, 14, 99);
+    const heightCm = clamp(parseNum(input.height_cm) ?? 0, 120, 230);
+    const weightKg = clamp(parseNum(input.weight_kg) ?? 0, 30, 400);
+    const activityItem = state.activityLevels.find((item) => item.key === input.activity_key) || state.activityLevels[2] || { key: "moderate", label: "Moderato", factor: 1.55 };
+    const dietGoal = state.dietGoals.find((item) => item.key === input.diet_goal) || state.dietGoals[0] || { key: "maintenance", label: "Mantenimento", adjustment_percent: 0, direction: "mantenimento" };
+    const idealWeightKg = parseNum(input.ideal_weight_kg);
+    const targetBf = parseNum(input.target_body_fat_percent);
+    const preset = state.macroPresets.find((item) => item.key === input.macro_preset) || state.macroPresets[0] || { key: "balanced", label: "Bilanciata", protein_g_per_kg: 1.8, fat_g_per_kg: 0.8 };
+    const proteinFactor = clamp(parseNum(input.protein_g_per_kg) ?? preset.protein_g_per_kg, 0.8, 3.5);
+    const fatFactor = clamp(parseNum(input.fat_g_per_kg) ?? preset.fat_g_per_kg, 0.3, 2.0);
+    const bfMethod = String(input.bf_method || "auto").trim().toLowerCase();
+    const manualBf = parseNum(input.body_fat_manual);
+    const waist = parseNum(input.waist_cm);
+    const neck = parseNum(input.neck_cm);
+    const hips = parseNum(input.hips_cm);
+    const canNavy = sex && waist != null && neck != null && (sex === "male" || hips != null);
+
+    if (!sex || !ageYears || !heightCm || !weightKg) {
+      return { ready: false, warnings: [] };
+    }
+
+    let bodyFatPercent;
+    let bodyFatMethod;
+    let bodyFatLabel;
+    let bodyFatDetails;
+
+    if (bfMethod === "manual") {
+      if (manualBf == null) return { ready: false, warnings: ["Inserisci la BF manuale."] };
+      bodyFatPercent = clamp(manualBf, 3, 80);
+      bodyFatMethod = "manuale";
+      bodyFatLabel = "BF manuale";
+      bodyFatDetails = "Valore inserito manualmente.";
+    } else if (bfMethod === "navy" || (bfMethod === "auto" && canNavy)) {
+      if (!canNavy) return { ready: false, warnings: ["Completa i campi Navy per calcolare la BF."] };
+      const heightIn = heightCm / 2.54;
+      const waistIn = waist / 2.54;
+      const neckIn = neck / 2.54;
+      if (sex === "male") {
+        const diff = waistIn - neckIn;
+        if (diff <= 0) return { ready: false, warnings: ["Le misure Navy non sono coerenti."] };
+        bodyFatPercent = 86.01 * Math.log10(diff) - 70.041 * Math.log10(heightIn) + 36.76;
+      } else {
+        const hipIn = hips / 2.54;
+        const diff = waistIn + hipIn - neckIn;
+        if (diff <= 0) return { ready: false, warnings: ["Le misure Navy non sono coerenti."] };
+        bodyFatPercent = 163.205 * Math.log10(diff) - 97.684 * Math.log10(heightIn) - 78.387;
+      }
+      bodyFatMethod = "navy";
+      bodyFatLabel = "Metodo Navy";
+      bodyFatDetails = "Stima da circonferenze.";
+    } else {
+      const bmi = weightKg / Math.pow(heightCm / 100, 2);
+      const sexFlag = sex === "male" ? 1 : 0;
+      bodyFatPercent = 1.2 * bmi + 0.23 * ageYears - 10.8 * sexFlag - 5.4;
+      bodyFatMethod = "estimate";
+      bodyFatLabel = "Stima BMI";
+      bodyFatDetails = "Stima automatica basata su BMI, eta e sesso.";
+    }
+
+    bodyFatPercent = clamp(bodyFatPercent, 3, 80);
+    const bmi = weightKg / Math.pow(heightCm / 100, 2);
+    const bmr = sex === "male" ? 10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5 : 10 * weightKg + 6.25 * heightCm - 5 * ageYears - 161;
+    const activityFactor = activityItem.factor;
+    const tdee = bmr * activityFactor;
+    const leanMass = weightKg * (1 - bodyFatPercent / 100);
+    const fatMass = weightKg - leanMass;
+    const targetWeightFromBf = targetBf != null ? leanMass / (1 - targetBf / 100) : null;
+    const displayIdealWeight = idealWeightKg != null ? idealWeightKg : targetWeightFromBf;
+    const calorieTarget = Math.max(0, tdee * (1 + (dietGoal.adjustment_percent / 100)));
+    const dailyDelta = calorieTarget - tdee;
+    const direction = dietGoal.direction;
+    const weeklyChangeKg = dailyDelta * 7 / 7700;
+    const weeklyChangePct = Math.abs(weeklyChangeKg) / weightKg * 100;
+    const proteinG = proteinFactor * (direction === "deficit" ? leanMass : weightKg);
+    const fatG = fatFactor * weightKg;
+    const proteinKcal = proteinG * 4;
+    const fatKcal = fatG * 9;
+    let carbsKcal = calorieTarget - proteinKcal - fatKcal;
+    let carbsG = carbsKcal > 0 ? carbsKcal / 4 : 0;
+    if (carbsKcal < 0) {
+      carbsKcal = 0;
+      carbsG = 0;
+    }
+
+    const warnings = [];
+    if (Math.abs(dietGoal.adjustment_percent) >= 20) warnings.push("Il piano e aggressivo: monitora energia e recupero.");
+    if (calorieTarget < (sex === "male" ? 1500 : 1200)) warnings.push("Le calorie stimate scendono molto in basso: valuta piu tempo o un target BF meno spinto.");
+    if (weeklyChangePct > 1.25) warnings.push("La velocita settimanale stimata e alta.");
+    if (bodyFatMethod === "estimate") warnings.push("La BF e stimata dal BMI: se puoi, inserisci le circonferenze o un valore manuale.");
+
+    const summaryParts = [`Obiettivo: ${dietGoal.label} a ${formatCalories(calorieTarget)}.`];
+    if (displayIdealWeight != null) summaryParts.push(`Peso ideale ${formatWeight(displayIdealWeight)}.`);
+    if (targetBf != null) summaryParts.push(`Target BF ${formatPercent(targetBf)}.`);
+
+    return {
+      ready: true,
+      inputs: {
+        sex,
+        age_years: ageYears,
+        height_cm: heightCm,
+        weight_kg: weightKg,
+        activity_key: activityItem.key,
+        activity_label: activityItem.label,
+        activity_factor: Math.round(activityFactor * 1000) / 1000,
+        diet_goal: dietGoal.key,
+        diet_goal_label: dietGoal.label,
+        diet_goal_adjustment_percent: dietGoal.adjustment_percent,
+        bf_method: bfMethod,
+        body_fat_manual: manualBf,
+        waist_cm: waist,
+        neck_cm: neck,
+        hips_cm: hips,
+        ideal_weight_kg: idealWeightKg,
+        target_body_fat_percent: targetBf,
+        macro_preset: preset.key,
+        protein_g_per_kg: proteinFactor,
+        fat_g_per_kg: fatFactor,
+        goal_note: input.goal_note || "",
+      },
+      metrics: {
+        bmi,
+        bmi_category: bmiCategory(bmi),
+        bmr,
+        tdee,
+        body_fat_percent: bodyFatPercent,
+        body_fat_method: bodyFatMethod,
+        body_fat_label: bodyFatLabel,
+        body_fat_details: bodyFatDetails,
+        lean_mass_kg: leanMass,
+        fat_mass_kg: fatMass,
+        ideal_weight_kg: displayIdealWeight != null ? displayIdealWeight : null,
+        target_weight_kg: displayIdealWeight != null ? displayIdealWeight : null,
+        target_weight_from_bf_kg: targetWeightFromBf,
+        target_body_fat_percent: targetBf,
+        diet_goal: dietGoal.key,
+        diet_goal_label: dietGoal.label,
+        diet_goal_adjustment_percent: dietGoal.adjustment_percent,
+        weight_delta_kg: displayIdealWeight != null ? displayIdealWeight - weightKg : 0,
+        weekly_change_kg: weeklyChangeKg,
+        weekly_change_percent: weeklyChangePct,
+        daily_calorie_delta: dailyDelta,
+        calorie_target: calorieTarget,
+        direction,
+      },
+      macros: {
+        preset,
+        protein_g: proteinG,
+        protein_kcal: proteinKcal,
+        fat_g: fatG,
+        fat_kcal: fatKcal,
+        carbs_g: carbsG,
+        carbs_kcal: carbsKcal,
+      },
+      warnings,
+      summary: summaryParts.join(" "),
+    };
   }
 
-  function closeEntryModal() {
-    state.editingEntryId = null;
-    els.entryModal.classList.add("hidden");
-  }
-
-  function openCategoryModal(category) {
-    state.editingCategoryId = category ? category.id : null;
-    els.categoryModalTitle.textContent = category ? "Modifica categoria" : "Nuova categoria";
-    els.deleteCategory.classList.toggle("hidden", !category);
-    els.categoryName.value = category ? category.name : "";
-    els.categoryColor.value = category ? category.color : "#1f7a6f";
-    els.categoryArchived.checked = category ? Boolean(category.archived) : false;
-    els.categoryModal.classList.remove("hidden");
-  }
-
-  function closeCategoryModal() {
-    state.editingCategoryId = null;
-    els.categoryModal.classList.add("hidden");
-  }
-
-  function renderMetrics() {
-    const balance = Number(state.summary.balance || 0);
-    els.metricBalance.textContent = formatMoney(balance);
-    els.metricBalanceNote.textContent = balance >= 0 ? "Entrate meno uscite del mese" : "Periodo da tenere sotto controllo";
-    els.metricExpense.textContent = formatMoney(state.summary.expense_total || 0);
-    els.metricIncome.textContent = formatMoney(state.summary.income_total || 0);
-    const top = state.summary.top_category;
-    els.topCategoryTag.textContent = top ? `${top.name} - ${formatMoney(top.amount)}` : "Nessuna";
-  }
-
-  function renderCategoryBars() {
-    const items = state.summary.category_totals || [];
-    if (!items.length) {
-      els.categoryBars.innerHTML = "<div class='empty-state'>Nessuna spesa categorizzata nel mese selezionato.</div>";
+  function renderMetrics(plan) {
+    const metrics = plan && plan.metrics;
+    if (!metrics) {
+      els.metricBmi.textContent = "0.0";
+      els.metricBmiNote.textContent = "Classe BMI";
+      els.metricBmr.textContent = "0 kcal";
+      els.metricTdee.textContent = "0 kcal";
+      els.metricBf.textContent = "0.0%";
+      els.metricIdealWeight.textContent = "0.0 kg";
+      els.metricCalories.textContent = "0 kcal";
+      els.metricTargetBf.textContent = "0.0%";
+      els.bfMethodChip.textContent = "In attesa";
+      els.planSummary.textContent = "Compila il form per generare il piano.";
+      els.dietStatusChip.textContent = "In attesa";
       return;
     }
-    const maxValue = Math.max(...items.map((item) => Number(item.amount || 0)), 1);
-    els.categoryBars.innerHTML = items.map((item) => {
-      const width = Math.max(8, Math.round((Number(item.amount || 0) / maxValue) * 100));
+    els.metricBmi.textContent = formatNumber(metrics.bmi, 1);
+    els.metricBmiNote.textContent = metrics.bmi_category;
+    els.metricBmr.textContent = formatCalories(metrics.bmr);
+    els.metricTdee.textContent = formatCalories(metrics.tdee);
+    els.metricBf.textContent = formatPercent(metrics.body_fat_percent);
+    els.metricIdealWeight.textContent = metrics.ideal_weight_kg != null ? formatWeight(metrics.ideal_weight_kg) : "-";
+    els.metricCalories.textContent = formatCalories(metrics.calorie_target);
+    els.metricTargetBf.textContent = metrics.target_body_fat_percent != null ? formatPercent(metrics.target_body_fat_percent) : "-";
+    els.bfMethodChip.textContent = metrics.body_fat_label;
+    els.planSummary.textContent = plan.summary || "Piano pronto.";
+    els.dietStatusChip.textContent = metrics.diet_goal_label || (metrics.direction === "deficit" ? "Cut" : metrics.direction === "surplus" ? "Bulk" : "Mantenimento");
+  }
+
+  function renderDiet(plan) {
+    const metrics = plan && plan.metrics;
+    const macros = plan && plan.macros;
+    if (!macros) {
+      els.dietProtein.textContent = "0 g";
+      els.dietProteinNote.textContent = "0 kcal";
+      els.dietFat.textContent = "0 g";
+      els.dietFatNote.textContent = "0 kcal";
+      els.dietCarbs.textContent = "0 g";
+      els.dietCarbsNote.textContent = "0 kcal";
+      els.dietGoal.textContent = "Mantenimento";
+      els.dietGoalNote.textContent = "0% del TDEE";
+      els.warningList.innerHTML = "";
+      return;
+    }
+    els.dietProtein.textContent = `${formatNumber(macros.protein_g, 1)} g`;
+    els.dietProteinNote.textContent = formatCalories(macros.protein_kcal);
+    els.dietFat.textContent = `${formatNumber(macros.fat_g, 1)} g`;
+    els.dietFatNote.textContent = formatCalories(macros.fat_kcal);
+    els.dietCarbs.textContent = `${formatNumber(macros.carbs_g, 1)} g`;
+    els.dietCarbsNote.textContent = formatCalories(macros.carbs_kcal);
+    els.dietGoal.textContent = metrics && metrics.diet_goal_label ? metrics.diet_goal_label : (metrics && metrics.direction === "surplus" ? "Bulk" : metrics && metrics.direction === "deficit" ? "Cut" : "Mantenimento");
+    const adjustment = metrics && metrics.diet_goal_adjustment_percent != null ? Number(metrics.diet_goal_adjustment_percent) : 0;
+    els.dietGoalNote.textContent = adjustment === 0 ? "0% del TDEE" : `${adjustment > 0 ? "+" : ""}${adjustment}% del TDEE`;
+    els.warningList.innerHTML = (plan.warnings || []).length
+      ? (plan.warnings || []).map((warning) => `<span class="warning-pill">${escapeHtml(warning)}</span>`).join("")
+      : `<span class="tag success">Nessun warning rilevato</span>`;
+  }
+
+  function renderProfile() {
+    const user = state.me;
+    els.profileAvatar.textContent = avatarText(user);
+    els.profileName.textContent = user ? (user.name || "Il tuo profilo") : "Benvenuto";
+    els.profileEmail.textContent = user ? (user.email || "") : "Nessun account caricato";
+    const profile = state.profile || {};
+    const latest = state.latestPlan || state.preview;
+    const latestGoal = latest && latest.metrics ? (latest.metrics.diet_goal_label || (latest.metrics.direction === "deficit" ? "Cut" : latest.metrics.direction === "surplus" ? "Bulk" : "Mantenimento")) : "";
+    els.profileWeight.textContent = profile.weight_kg ? formatWeight(profile.weight_kg) : "-";
+    els.profileBf.textContent = latest && latest.metrics ? formatPercent(latest.metrics.body_fat_percent) : "-";
+    els.profileTarget.textContent = profile.diet_goal_label || profile.diet_goal || latestGoal || "-";
+    els.profileActivity.textContent = profile.activity_key ? (state.activityLevels.find((item) => item.key === profile.activity_key)?.label || profile.activity_key) : "-";
+  }
+
+  function renderPlanHistory() {
+    const plans = state.plans || [];
+    if (!plans.length) {
+      els.planHistoryList.innerHTML = "<div class='empty-state'>Nessun piano salvato ancora.</div>";
+      return;
+    }
+    els.planHistoryList.innerHTML = plans.map((plan) => {
+      const metrics = plan.metrics || {};
+      const inputs = plan.inputs || {};
+      const historyNotes = [];
+      if (inputs.ideal_weight_kg != null && String(inputs.ideal_weight_kg).trim() !== "") historyNotes.push(`Peso ideale ${formatWeight(inputs.ideal_weight_kg)}`);
+      if (inputs.target_body_fat_percent != null && String(inputs.target_body_fat_percent).trim() !== "") historyNotes.push(`Target BF ${formatPercent(inputs.target_body_fat_percent)}`);
+      const legacyGoal = metrics.direction === "deficit" ? "Cut" : metrics.direction === "surplus" ? "Bulk" : "Mantenimento";
       return `
-        <div class="bar-row">
-          <div class="bar-meta">
-            <span>${escapeHtml(item.name)}</span>
-            <strong>${escapeHtml(formatMoney(item.amount))}</strong>
+        <article class="stack-item">
+          <h4>${escapeHtml(formatDateTime(plan.created_at))} - ${escapeHtml(formatCalories(metrics.calorie_target || 0))}</h4>
+          <p>${escapeHtml(metrics.diet_goal_label || inputs.diet_goal_label || inputs.diet_goal || legacyGoal)}${historyNotes.length ? ` - ${escapeHtml(historyNotes.join(" - "))}` : ""}</p>
+          <div class="stack-meta">
+            <span class="tag success">${escapeHtml(metrics.diet_goal_label || (metrics.direction === "deficit" ? "Cut" : metrics.direction === "surplus" ? "Bulk" : "Mantenimento"))}</span>
+            <span class="pill">BMI ${escapeHtml(formatNumber(metrics.bmi || 0, 1))}</span>
+            <span class="pill">TDEE ${escapeHtml(formatCalories(metrics.tdee || 0))}</span>
           </div>
-          <div class="bar-track">
-            <div class="bar-fill" style="width:${width}%; background:${escapeHtml(item.color)};"></div>
-          </div>
-        </div>
+        </article>
       `;
     }).join("");
   }
 
-  function filteredEntries() {
-    const term = state.search.trim().toLowerCase();
-    return state.entries.filter((entry) => {
-      if (state.filterType === "expense" && entry.entry_type !== "expense") return false;
-      if (state.filterType === "income" && entry.entry_type !== "income") return false;
-      if (state.filterType === "uncategorized" && !entry.needs_category) return false;
-      if (!term) return true;
-      const haystack = `${entry.title} ${entry.notes} ${(entry.category && entry.category.name) || ""} ${entry.source || ""}`.toLowerCase();
-      return haystack.includes(term);
-    });
-  }
-
-  function movementRowMarkup(entry) {
-    const dotColor = entry.category ? entry.category.color : (entry.entry_type === "income" ? "#27e89d" : "#ff4d7a");
-    const amountClass = entry.entry_type === "income" ? "income" : "expense";
-    const categoryLabel = entry.category ? entry.category.name : "Senza categoria";
-    const sourceTag = entry.imported ? "<span class='soft-chip'>Postepay</span>" : "";
-    const categoryTag = entry.needs_category ? "<span class='soft-chip needs-tag'>Da catalogare</span>" : "";
-    return `
-      <article class="movement-row" data-entry-id="${entry.id}">
-        <span class="dot" style="background:${escapeHtml(dotColor)};"></span>
-        <div class="movement-copy">
-          <strong>${escapeHtml(entry.title)}</strong>
-          <p>${escapeHtml(formatShortDate(entry.occurred_on))} - ${escapeHtml(categoryLabel)}</p>
-          <div class="movement-tags">${sourceTag}${categoryTag}</div>
-          ${entry.notes ? `<p>${escapeHtml(entry.notes)}</p>` : ""}
-          <div class="movement-actions">
-            <button class="mini-btn" data-entry-action="edit" data-entry-id="${entry.id}">Modifica</button>
-            <button class="mini-btn" data-entry-action="delete" data-entry-id="${entry.id}">Elimina</button>
-          </div>
-        </div>
-        <div class="movement-amount">
-          <strong class="${amountClass}">${escapeHtml(formatMoney(entry.amount))}</strong>
-          <small>${escapeHtml(entry.entry_type_label)}</small>
-        </div>
-      </article>
-    `;
-  }
-
-  function renderMovements() {
-    const items = filteredEntries();
+  function renderCheckins() {
+    const items = state.checkins || [];
     if (!items.length) {
-      els.movementList.innerHTML = "<div class='empty-state'>Nessun movimento trovato con i filtri attivi.</div>";
+      els.checkinList.innerHTML = "<div class='empty-state'>Nessun check-in ancora.</div>";
       return;
     }
-    els.movementList.innerHTML = items.map(movementRowMarkup).join("");
-  }
-
-  function renderCategories() {
-    if (!state.categories.length) {
-      els.categoryGrid.innerHTML = "<div class='empty-state'>Crea la tua prima categoria personalizzata.</div>";
-      return;
-    }
-    els.categoryGrid.innerHTML = state.categories.map((category) => `
-      <article class="category-card" data-category-id="${category.id}">
-        <div class="category-head">
-          <div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span class="swatch" style="background:${escapeHtml(category.color)};"></span>
-              <strong>${escapeHtml(category.name)}</strong>
-            </div>
-            <p class="helper">${category.archived ? "Categoria archiviata" : "Categoria attiva"}</p>
-          </div>
-          <span class="soft-chip">${category.entry_count} mov.</span>
-        </div>
-        <div class="category-meta">
-          <div class="meta-pill">Spese: ${escapeHtml(formatMoney(category.expense_total))}</div>
-          <div class="meta-pill">Entrate: ${escapeHtml(formatMoney(category.income_total))}</div>
-        </div>
-        <div class="category-actions">
-          <button class="mini-btn" data-category-action="edit" data-category-id="${category.id}">Modifica</button>
-          <button class="mini-btn" data-category-action="delete" data-category-id="${category.id}">Archivia</button>
-        </div>
+    els.checkinList.innerHTML = items.map((item) => `
+      <article class="stack-item">
+        <h4>${escapeHtml(formatDate(item.measured_on))} - ${escapeHtml(formatWeight(item.weight_kg || 0))}</h4>
+        <p>${escapeHtml(item.body_fat_percent != null ? formatPercent(item.body_fat_percent) : "BF non inserita")}${item.notes ? ` - ${escapeHtml(item.notes)}` : ""}</p>
       </article>
     `).join("");
   }
 
-  function renderProfileBreakdown() {
-    if (!els.profileBreakdown) return;
-    const summary = state.profileSummary;
-    const lines = [
-      `Periodo attivo: ${state.profilePeriod.label || "-"}`,
-      `Numero spese: ${summary.expense_count || 0}`,
-      `Numero entrate: ${summary.income_count || 0}`,
-      `Media entrate: ${formatMoney(summary.average_income || 0)}`,
-      `Giorni coperti: ${summary.period_days || 0}`,
-      `Categoria piu pesante: ${summary.top_category ? `${summary.top_category.name} - ${formatMoney(summary.top_category.amount)}` : "Nessuna"}`,
-      `Spesa piu alta: ${summary.biggest_expense ? `${summary.biggest_expense.title} - ${formatMoney(summary.biggest_expense.amount)} (${formatShortDate(summary.biggest_expense.occurred_on)})` : "Nessuna"}`,
-    ];
-
-    const categoryLines = (summary.category_totals || []).slice(0, 5).map((item) => {
-      return `Categoria: ${item.name} - ${formatMoney(item.amount)}`;
-    });
-
-    const allLines = lines.concat(categoryLines);
-    els.profileBreakdown.innerHTML = allLines.map((line) => `
-      <article class="recent-row compact-row">
-        <div class="recent-copy">
-          <p>${escapeHtml(line)}</p>
-        </div>
-      </article>
-    `).join("");
-  }
-
-  function bankTransactionMarkup(item) {
-    const amountClass = item.direction === "income" ? "income" : "expense";
-    const dotColor = item.direction === "income" ? "#27e89d" : "#ff4d7a";
-    const amountPrefix = item.direction === "income" ? "+" : "-";
-    return `
-      <article class="movement-row">
-        <span class="dot" style="background:${dotColor};"></span>
-        <div class="movement-copy">
-          <strong>${escapeHtml(item.title || "Movimento Postepay")}</strong>
-          <p>${escapeHtml(formatShortDate(item.date || ""))}${item.status ? ` - ${escapeHtml(item.status)}` : ""}</p>
-          ${item.notes ? `<p>${escapeHtml(item.notes)}</p>` : ""}
-        </div>
-        <div class="movement-amount">
-          <strong class="${amountClass}">${escapeHtml(`${amountPrefix}${formatMoney(item.amount || 0)}`)}</strong>
-          <small>${escapeHtml(item.currency || "EUR")}</small>
-        </div>
-      </article>
-    `;
-  }
-
-  function renderBank() {
-    const bank = state.bank || {};
-    const hasBalance = bank.current_balance != null || bank.available_balance != null || bank.booked_balance != null;
-    const visibleBalance = bank.current_balance ?? bank.available_balance ?? bank.booked_balance;
-    const balanceLabel = bank.balance_label ? `Saldo ${bank.balance_label.toLowerCase()}` : "Saldo attuale";
-    const flashMessage = state.bankFlash && state.bankFlash.message ? state.bankFlash.message : "";
-
-    els.bankBalance.textContent = hasBalance ? formatMoney(visibleBalance) : "-";
-    els.bankAccountName.textContent = bank.connected ? (bank.account_name || "Carta Postepay") : "Nessun collegamento";
-    els.bankIban.textContent = bank.account_iban || "IBAN o PAN non disponibile";
-    els.bankValidUntil.textContent = formatAccessDate(bank.access_valid_until);
-    els.bankMessage.textContent = flashMessage || bank.last_error || "";
-
-    if (!bank.configured) {
-      els.bankStatusText.textContent = "Manca la configurazione del provider PSD2 per collegare davvero la Postepay.";
-      els.bankSyncChip.textContent = "Non configurato";
-      els.bankBalance.previousElementSibling.textContent = "Saldo attuale";
-      els.bankTransactionList.innerHTML = "<div class='empty-state'>Configura Enable Banking nel server per attivare saldo e movimenti live.</div>";
-      els.bankConnect.disabled = true;
-      els.bankSync.disabled = true;
-      els.bankDisconnect.disabled = true;
-      return;
-    }
-
-    els.bankBalance.previousElementSibling.textContent = balanceLabel;
-    els.bankConnect.disabled = false;
-    els.bankSync.disabled = !bank.connected;
-    els.bankDisconnect.disabled = !bank.connected;
-
-    if (!bank.connected) {
-      els.bankStatusText.textContent = "Carta non ancora collegata. Il collegamento usa il consenso ufficiale PSD2.";
-      els.bankSyncChip.textContent = "Da collegare";
-      els.bankTransactionList.innerHTML = "<div class='empty-state'>Collega la tua Postepay Evolution per scaricare saldo e movimenti.</div>";
-      return;
-    }
-
-    els.bankStatusText.textContent = state.bankSyncInFlight
-      ? "Sto sincronizzando saldo e movimenti Postepay."
-      : bank.last_sync_at
-        ? `Saldo e movimenti aggiornati al ${formatDateTime(bank.last_sync_at)}.`
-        : "Carta collegata. Sto aspettando la prima sincronizzazione.";
-    if (state.bankSyncInFlight) {
-      els.bankSyncChip.textContent = "Sincronizzo";
-    } else if ((bank.pending_category_count || 0) > 0) {
-      els.bankSyncChip.textContent = `${bank.pending_category_count} da catalogare`;
-    } else {
-      els.bankSyncChip.textContent = bank.last_sync_at ? "Sincronizzata" : "Collegata";
-    }
-
-    if (!(bank.transactions || []).length) {
-      els.bankTransactionList.innerHTML = "<div class='empty-state'>Nessun movimento scaricato. Premi Aggiorna saldo per sincronizzare i dati.</div>";
-      return;
-    }
-
-    els.bankTransactionList.innerHTML = (bank.transactions || []).slice(0, 8).map(bankTransactionMarkup).join("");
-  }
-
-  function renderProfile() {
-    renderBank();
-  }
-
-  function renderApp() {
-    renderCategoryOptions(null);
-    renderMetrics();
-    renderCategoryBars();
-    renderMovements();
-    renderCategories();
+  function renderAll() {
+    const plan = state.latestPlan || state.preview;
+    renderMetrics(plan);
+    renderDiet(plan);
     renderProfile();
-    els.monthCaption.textContent = `Panoramica di ${state.monthLabel.toLowerCase()}`;
+    renderPlanHistory();
+    renderCheckins();
+    updateActivityChip();
   }
 
-  function entryById(entryId) {
-    const targetId = Number(entryId);
-    return state.entries.find((entry) => Number(entry.id) === targetId) || null;
+  function applyStateToForm() {
+    const stored = loadDraft();
+    const profile = profileToDraft(state.profile || {});
+    const merged = { ...defaultDraft, ...stored, ...profile };
+    applyDraftToForm(merged);
+    if (!els.checkinDateInput.value) els.checkinDateInput.value = (els.body.dataset.today || new Date().toISOString().slice(0, 10));
   }
 
-  function categoryById(categoryId) {
-    return state.categories.find((category) => Number(category.id) === Number(categoryId)) || null;
+  function refreshPreview() {
+    const draft = readFormDraft();
+    state.preview = computeLocalPlan(draft);
+    renderAll();
+    persistDraft();
   }
 
-  async function refreshMe() {
-    const data = await api("/api/me");
-    if (!data.logged_in || !data.user) {
-      state.me = null;
-      showGate("auth");
+  function setStatus(message) {
+    els.syncChip.textContent = message;
+    els.headerSubtitle.textContent = message;
+  }
+
+  function refreshMe() {
+    return api("/api/me").then((data) => {
+      if (!data.logged_in || !data.user) {
+        state.me = null;
+        showGate("auth");
+        return false;
+      }
+      state.me = data.user;
+      showGate("app");
+      els.welcomeName.textContent = `Ciao, ${state.me.name || "utente"}`;
+      setStatus("Pronto");
+      return true;
+    });
+  }
+
+  function refreshState() {
+    if (state.refreshPromise) return state.refreshPromise;
+    state.refreshPromise = api("/api/state")
+      .then((data) => {
+        state.activityLevels = data.activity_levels || [];
+        state.dietGoals = data.diet_goals || [];
+        state.macroPresets = data.macro_presets || [];
+        state.profile = data.profile || {};
+        state.latestPlan = data.latest_plan || null;
+        state.plans = data.plans || [];
+        state.checkins = data.checkins || [];
+        updateActivitySelect();
+        updateDietGoalSelect();
+        updateMacroPresetSelect();
+        applyStateToForm();
+        state.preview = state.latestPlan || computeLocalPlan(readFormDraft());
+        renderAll();
+      })
+      .finally(() => {
+        state.refreshPromise = null;
+      });
+    return state.refreshPromise;
+  }
+
+  function submitPlan() {
+    const draft = readFormDraft();
+    const local = computeLocalPlan(draft);
+    if (!local || !local.ready) {
+      showToast((local && local.warnings && local.warnings[0]) || "Completa i campi necessari per generare il piano.", "warn");
+      renderAll();
       return;
     }
-    state.me = data.user;
-    showGate("app");
-    els.welcomeName.textContent = `Ciao, ${state.me.name || "utente"}`;
-  }
-
-  async function refreshState(options = {}) {
-    if (state.refreshPromise) return state.refreshPromise;
-    const run = (async () => {
-      const params = new URLSearchParams({ month: state.month });
-      const data = await api(`/api/state?${params.toString()}`);
-      state.month = data.month;
-      state.monthLabel = data.month_label;
-      state.storageMode = data.storage_mode;
-      state.categories = data.categories || [];
-      state.entries = data.entries || [];
-      state.summary = data.summary || state.summary;
-      state.profilePeriod = data.profile_period || state.profilePeriod;
-      state.profileSummary = data.profile_summary || state.profileSummary;
-      state.bank = data.bank || state.bank;
-      state.lastStateFetchAt = Date.now();
-      renderApp();
-    })();
-    state.refreshPromise = run;
-    try {
-      await run;
-    } finally {
-      state.refreshPromise = null;
-    }
-    if (!options.skipAutoSync) {
-      maybeAutoSyncBank();
-    }
-  }
-
-  async function saveEntry() {
-    const payload = {
-      entry_type: els.entryType.value,
-      occurred_on: els.entryDate.value,
-      title: els.entryTitle.value,
-      amount: els.entryAmount.value,
-      category_id: els.entryCategory.value || null,
-      notes: els.entryNotes.value,
-    };
-    const url = state.editingEntryId ? `/api/entries/${state.editingEntryId}` : "/api/entries";
-    const method = state.editingEntryId ? "PUT" : "POST";
-    await api(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    closeEntryModal();
-    await refreshState();
-  }
-
-  async function removeEntry(entryId) {
-    if (!window.confirm("Eliminare questo movimento?")) return;
-    await api(`/api/entries/${entryId}`, { method: "DELETE" });
-    closeEntryModal();
-    await refreshState();
-  }
-
-  async function saveQuickCategory() {
-    await api("/api/categories", {
+    setStatus("Sto salvando il piano...");
+    api("/api/plan/calc", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: els.quickCategoryName.value,
-        color: els.quickCategoryColor.value,
-        archived: false,
-      }),
-    });
-    resetQuickCategoryForm();
-    await refreshState();
+      body: JSON.stringify(draft),
+      timeoutMs: 15000,
+    })
+      .then((data) => {
+        state.profile = data.profile || state.profile;
+        state.latestPlan = data.latest_plan || data.plan || state.latestPlan;
+        state.plans = data.plans || state.plans;
+        state.checkins = data.checkins || state.checkins;
+        state.preview = state.latestPlan || local;
+        applyStateToForm();
+        renderAll();
+        showToast(data.message || "Piano salvato.", "success");
+        setStatus("Piano salvato");
+      })
+      .catch((err) => {
+        showToast(err.message, "danger");
+        setStatus("Errore nel salvataggio");
+      });
   }
 
-  async function saveCategory() {
+  function saveCheckin() {
     const payload = {
-      name: els.categoryName.value,
-      color: els.categoryColor.value,
-      archived: els.categoryArchived.checked,
+      measured_on: els.checkinDateInput.value,
+      weight_kg: els.checkinWeightInput.value,
+      body_fat_percent: els.checkinBfInput.value,
+      notes: els.checkinNoteInput.value,
     };
-    const url = state.editingCategoryId ? `/api/categories/${state.editingCategoryId}` : "/api/categories";
-    const method = state.editingCategoryId ? "PUT" : "POST";
-    await api(url, {
-      method,
+    if (!payload.weight_kg) {
+      showToast("Inserisci il peso del check-in.", "warn");
+      return;
+    }
+    api("/api/checkins", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
-    closeCategoryModal();
-    await refreshState();
+    })
+      .then((data) => {
+        state.checkins = data.checkins || [];
+        renderCheckins();
+        renderProfile();
+        showToast(data.message || "Check-in salvato.", "success");
+      })
+      .catch((err) => showToast(err.message, "danger"));
   }
 
-  async function removeCategory(categoryId) {
-    if (!window.confirm("Archiviare o eliminare questa categoria?")) return;
-    await api(`/api/categories/${categoryId}`, { method: "DELETE" });
-    closeCategoryModal();
-    await refreshState();
+  function downloadCsv() {
+    window.location.href = `/api/export.csv?v=${encodeURIComponent(assetVersion)}`;
   }
 
-  async function connectBank() {
-    const data = await api("/api/bank/connect", { method: "POST" });
-    if (!data.redirect_url) {
-      throw new Error("Il provider non ha restituito un URL di collegamento.");
-    }
-    window.location.assign(data.redirect_url);
-  }
-
-  function needsBankAutoSync() {
-    const bank = state.bank || {};
-    if (!bank.connected || !bank.configured) return false;
-    if (state.bankSyncInFlight) return false;
-    if (state.bankAutoSyncRequested) return true;
-    if (!bank.last_sync_at) return true;
-    const lastSync = new Date(String(bank.last_sync_at).replace(" ", "T"));
-    if (Number.isNaN(lastSync.getTime())) return true;
-    const ageMinutes = (Date.now() - lastSync.getTime()) / 60000;
-    return ageMinutes >= Number(bank.auto_sync_minutes || 30);
-  }
-
-  async function syncBank(options = {}) {
-    if (state.bankSyncInFlight) return;
-    state.bankSyncInFlight = true;
-    renderBank();
-    try {
-      const data = await api("/api/bank/sync", { method: "POST", timeoutMs: 25000 });
-      state.bank = data.bank || state.bank;
-      state.bankFlash = options.preserveFlash && state.bankFlash
-        ? state.bankFlash
-        : { status: "success", message: data.message || "Saldo Postepay aggiornato." };
-      state.bankAutoSyncRequested = false;
-      state.bankAutoSyncDone = true;
-      renderBank();
-      await refreshState({ skipAutoSync: true });
-    } catch (err) {
-      state.bankFlash = { status: "error", message: err.message || "Sincronizzazione Postepay non riuscita." };
-      state.bankAutoSyncRequested = false;
-      state.bankAutoSyncDone = false;
-      renderBank();
-      throw err;
-    } finally {
-      state.bankSyncInFlight = false;
-      renderBank();
-    }
-  }
-
-  function maybeAutoSyncBank() {
-    if (state.bankAutoSyncDone && !state.bankAutoSyncRequested) return;
-    if (!needsBankAutoSync()) return;
-    syncBank({ preserveFlash: true }).catch(() => {});
-  }
-
-  async function disconnectBank() {
-    if (!window.confirm("Scollegare Postepay e rimuovere saldo e movimenti sincronizzati?")) return;
-    const data = await api("/api/bank/disconnect", { method: "POST" });
-    state.bankFlash = { status: "info", message: data.message || "Collegamento rimosso." };
-    state.bankAutoSyncRequested = false;
-    state.bankAutoSyncDone = false;
-    await refreshState();
-  }
-
-  async function logout() {
-    if (window.google && window.google.accounts && window.google.accounts.id) {
-      window.google.accounts.id.disableAutoSelect();
-    }
-    await api("/auth/logout", { method: "POST" });
-    state.me = null;
-    state.bankFlash = null;
-    showGate("auth");
-    initGoogleSignIn();
+  function logout() {
+    api("/auth/logout", { method: "POST" })
+      .then(() => {
+        state.me = null;
+        state.profile = {};
+        state.latestPlan = null;
+        state.plans = [];
+        state.checkins = [];
+        showGate("auth");
+        initGoogleSignIn();
+      })
+      .catch((err) => showToast(err.message, "danger"));
   }
 
   function initGoogleSignIn() {
-    if (!googleClientId || !els.googleSignin || googleInitialized) return;
+    if (!googleClientId || !els.googleSignin || state.googleInitialized) return;
     const waitForGoogle = () => {
       if (!(window.google && window.google.accounts && window.google.accounts.id)) {
-        window.setTimeout(waitForGoogle, 200);
+        window.setTimeout(waitForGoogle, 150);
         return;
       }
-      googleInitialized = true;
+      state.googleInitialized = true;
       window.google.accounts.id.initialize({
         client_id: googleClientId,
-        auto_select: true,
-        callback: async (response) => {
-          try {
-            await api("/auth/google", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ credential: response.credential }),
-            });
-            await refreshMe();
-            await refreshState();
-            hideBootSplash();
-          } catch (err) {
-            alert(err.message);
-          }
+        callback: (response) => {
+          api("/auth/google", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ credential: response.credential }),
+          })
+            .then((data) => {
+              state.me = data.user;
+              showGate("app");
+              els.welcomeName.textContent = `Ciao, ${state.me.name || "utente"}`;
+              refreshState();
+            })
+            .catch((err) => showToast(err.message, "danger"));
         },
+        auto_select: true,
+        cancel_on_tap_outside: false,
       });
       window.google.accounts.id.renderButton(els.googleSignin, {
-        theme: "outline",
+        theme: "filled_blue",
         size: "large",
         shape: "pill",
         text: "continue_with",
-        width: 280,
+        logo_alignment: "left",
+        width: 320,
       });
       window.google.accounts.id.prompt();
     };
@@ -793,8 +1006,42 @@
 
   function registerServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(assetVersion)}`, { updateViaCache: "none" }).catch(() => {});
+    navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(assetVersion)}`, { updateViaCache: "none" }).catch(() => {});
+  }
+
+  function bindFormEvents() {
+    const inputs = [
+      els.sexSelect,
+      els.ageInput,
+      els.heightInput,
+      els.weightInput,
+      els.activitySelect,
+      els.bfMethodSelect,
+      els.bodyFatManualInput,
+      els.waistInput,
+      els.neckInput,
+      els.hipsInput,
+      els.dietGoalSelect,
+      els.idealWeightInput,
+      els.targetBfInput,
+      els.macroPresetSelect,
+      els.proteinInput,
+      els.fatInput,
+      els.goalNoteInput,
+    ];
+    inputs.forEach((element) => {
+      element.addEventListener("input", () => {
+        if (element === els.macroPresetSelect) updateMacroPresetFields(true);
+        if (element === els.activitySelect) updateActivityChip();
+        if (element === els.bfMethodSelect) updateBfVisibility();
+        refreshPreview();
+      });
+      element.addEventListener("change", () => {
+        if (element === els.macroPresetSelect) updateMacroPresetFields(true);
+        if (element === els.activitySelect) updateActivityChip();
+        if (element === els.bfMethodSelect) updateBfVisibility();
+        refreshPreview();
+      });
     });
   }
 
@@ -802,153 +1049,62 @@
     els.navButtons.forEach((button) => {
       button.addEventListener("click", () => setActiveScreen(button.dataset.screen));
     });
-
-    els.monthPrev.addEventListener("click", () => shiftMonth(-1));
-    els.monthNext.addEventListener("click", () => shiftMonth(1));
-
-    [els.headerAddEntry, els.movementsAddEntry, els.fabEntry].forEach((button) => {
-      button.addEventListener("click", () => openEntryModal(null));
+    els.generateFromHeader.addEventListener("click", submitPlan);
+    els.calcSaveBtn.addEventListener("click", submitPlan);
+    els.fabCalc.addEventListener("click", () => {
+      setActiveScreen("screen-calc");
+      submitPlan();
     });
-
-    els.addCategory.addEventListener("click", () => {
-      resetQuickCategoryForm();
-      els.quickCategoryName.focus();
-    });
-
-    els.saveQuickCategory.addEventListener("click", () => {
-      saveQuickCategory().catch((err) => alert(err.message));
-    });
-
-    els.closeEntryModal.addEventListener("click", closeEntryModal);
-    els.closeCategoryModal.addEventListener("click", closeCategoryModal);
-
-    els.entryModal.addEventListener("click", (event) => {
-      if (event.target === els.entryModal) closeEntryModal();
-    });
-
-    els.categoryModal.addEventListener("click", (event) => {
-      if (event.target === els.categoryModal) closeCategoryModal();
-    });
-
-    els.saveEntry.addEventListener("click", () => saveEntry().catch((err) => alert(err.message)));
-    els.deleteEntry.addEventListener("click", () => {
-      if (!state.editingEntryId) return;
-      removeEntry(state.editingEntryId).catch((err) => alert(err.message));
-    });
-
-    els.saveCategory.addEventListener("click", () => saveCategory().catch((err) => alert(err.message)));
-    els.deleteCategory.addEventListener("click", () => {
-      if (!state.editingCategoryId) return;
-      removeCategory(state.editingCategoryId).catch((err) => alert(err.message));
-    });
-
-    els.filterButtons.forEach((button) => {
-      button.addEventListener("click", () => {
-        state.filterType = button.dataset.filterType;
-        els.filterButtons.forEach((item) => item.classList.toggle("active", item === button));
-        renderMovements();
-      });
-    });
-
-    els.searchInput.addEventListener("input", () => {
-      state.search = els.searchInput.value || "";
-      renderMovements();
-    });
-
-    els.movementList.addEventListener("click", (event) => {
-      const action = event.target.closest("[data-entry-action]");
-      if (!action) return;
-      const entry = entryById(action.dataset.entryId);
-      if (!entry) return;
-      if (action.dataset.entryAction === "edit") {
-        openEntryModal(entry);
-      } else if (action.dataset.entryAction === "delete") {
-        removeEntry(entry.id).catch((err) => alert(err.message));
-      }
-    });
-
-    els.categoryGrid.addEventListener("click", (event) => {
-      const action = event.target.closest("[data-category-action]");
-      if (!action) return;
-      const category = categoryById(action.dataset.categoryId);
-      if (!category) return;
-      if (action.dataset.categoryAction === "edit") {
-        openCategoryModal(category);
-      } else if (action.dataset.categoryAction === "delete") {
-        removeCategory(category.id).catch((err) => alert(err.message));
-      }
-    });
-
-    if (els.exportCsv) {
-      els.exportCsv.addEventListener("click", () => {
-        const params = new URLSearchParams({ month: state.month });
-        window.open(`/api/export.csv?${params.toString()}`, "_blank");
-      });
-    }
-
-    if (els.logoutBtn) {
-      els.logoutBtn.addEventListener("click", () => {
-        logout().catch((err) => alert(err.message));
-      });
-    }
-
-    els.bankConnect.addEventListener("click", () => {
-      connectBank().catch((err) => alert(err.message));
-    });
-
-    els.bankSync.addEventListener("click", () => {
-      syncBank().catch((err) => alert(err.message));
-    });
-
-    els.bankDisconnect.addEventListener("click", () => {
-      disconnectBank().catch((err) => alert(err.message));
-    });
-
+    els.saveCheckinBtn.addEventListener("click", saveCheckin);
+    els.exportCsvBtn.addEventListener("click", downloadCsv);
+    els.logoutBtn.addEventListener("click", logout);
     if (els.devLogin) {
-      els.devLogin.addEventListener("click", async () => {
-        try {
-          await api("/auth/dev-login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: els.devName.value,
-              email: els.devEmail.value,
-            }),
-          });
-          await refreshMe();
-          await refreshState();
-        } catch (err) {
-          alert(err.message);
-        }
+      els.devLogin.addEventListener("click", () => {
+        api("/auth/dev-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: els.devName.value,
+            email: els.devEmail.value,
+          }),
+        })
+          .then((data) => {
+            state.me = data.user;
+            showGate("app");
+            els.welcomeName.textContent = `Ciao, ${state.me.name || "utente"}`;
+            refreshState();
+          })
+          .catch((err) => showToast(err.message, "danger"));
       });
     }
-
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && state.me && (Date.now() - state.lastStateFetchAt) > 45000) {
-        refreshState().catch(() => {});
-      }
-    });
+    bindFormEvents();
   }
 
-  async function boot() {
-    document.title = appName;
-    setMonthValue(els.body.dataset.month || new Date().toISOString().slice(0, 7));
-    consumeBankFlashFromUrl();
-    bindEvents();
+  function boot() {
+    showGate("auth");
+    setActiveScreen("screen-dashboard");
     registerServiceWorker();
-
-    try {
-      await refreshMe();
-      if (state.me) {
-        await refreshState();
-      } else {
-        initGoogleSignIn();
-      }
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      hideBootSplash();
-    }
+    bindEvents();
+    initGoogleSignIn();
+    refreshMe()
+      .then((loggedIn) => {
+        hideBootSplash();
+        if (loggedIn) {
+          return refreshState().then(() => {
+            applyStateToForm();
+            refreshPreview();
+          });
+        }
+        applyDraftToForm(loadDraft());
+        refreshPreview();
+        return null;
+      })
+      .catch((err) => {
+        hideBootSplash();
+        showToast(err.message, "danger");
+        applyDraftToForm(loadDraft());
+        refreshPreview();
+      });
   }
 
   boot();
