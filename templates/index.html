@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="{{ pwa_short_name }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link rel="manifest" href="{{ url_for('manifest_webmanifest') }}?v={{ asset_version }}">
   <link rel="icon" href="{{ pwa_icon_href }}">
   <link rel="apple-touch-icon" href="{{ pwa_apple_icon_href }}">
@@ -18,28 +18,30 @@
 </head>
 <body
   data-today="{{ today_date }}"
-  data-month="{{ current_month }}"
   data-google-client-id="{{ google_client_id }}"
   data-pwa-app-name="{{ pwa_app_name }}"
   data-asset-version="{{ asset_version }}"
 >
   <section id="boot-splash" class="boot-splash">
     <article class="boot-card">
-      <p class="eyebrow">Spese Mixet</p>
-      <h1>Sto preparando la tua area personale.</h1>
-      <p class="helper">Controllo accesso, categorie e ultimi dati salvati.</p>
+      <p class="eyebrow">Fitness Gym Mixet</p>
+      <h1>Sto preparando il tuo coach numerico.</h1>
+      <p class="helper">Calcolo BMI, BMR, TDEE, BF e piano macro con login Google e storico su database.</p>
     </article>
   </section>
 
   <section id="auth-gate" class="gate hidden">
     <article class="hero-panel">
-      <p class="eyebrow">PWA personale</p>
-      <h1>Gestisci spese e saldo con lo stesso feeling dell'altra app.</h1>
-      <p class="lead">Spese Mixet tiene insieme categorie personalizzate, dashboard mensile e accesso persistente, con un'interfaccia coerente con la PWA originale.</p>
+      <p class="eyebrow">Fitness Gym</p>
+      <h1>Il tuo calcolatore dieta in stile mobile.</h1>
+      <p class="lead">Compila peso, altezza, fattore attività e tipo dieta. Peso ideale e target BF sono opzionali: l'app stima il fabbisogno, imposta i macro e conserva tutto nel tuo account.</p>
       <div class="hero-pills">
-        <span>Spese ed entrate</span>
-        <span>Categorie custom</span>
-        <span>Trend mensili</span>
+        <span>BMI</span>
+        <span>BMR</span>
+        <span>TDEE</span>
+        <span>BF Navy opzionale</span>
+        <span>Obiettivi opzionali</span>
+        <span>Macro variabili</span>
       </div>
     </article>
 
@@ -47,7 +49,7 @@
       <p class="eyebrow">Accesso</p>
       <h2>Entra nella tua area</h2>
       {% if google_client_id %}
-      <p class="helper">Accedi con Google e l'app manterra la sessione attiva anche alle riaperture successive.</p>
+      <p class="helper">Accedi con Google e la sessione restera attiva anche alle riaperture successive.</p>
       <div id="google-signin"></div>
       {% else %}
       <p class="helper">Google non configurato. Usa l'accesso di sviluppo.</p>
@@ -63,21 +65,15 @@
   </section>
 
   <div id="app-shell" class="hidden app-shell">
-    <input id="month-input" type="month" class="hidden-field">
-
     <header class="topbar">
       <div class="top-copy">
-        <p class="eyebrow">Spese Mixet</p>
+        <p class="eyebrow">Fitness Gym Mixet</p>
         <h1 id="welcome-name">Ciao</h1>
-        <p id="month-caption" class="helper">Panoramica del mese</p>
+        <p id="header-subtitle" class="helper">Il tuo piano fitness sincronizzato</p>
       </div>
       <div class="top-controls">
-        <div class="month-nav">
-          <button id="month-prev" class="icon-btn" aria-label="Mese precedente">&#8249;</button>
-          <div id="month-label" class="month-label">Mese</div>
-          <button id="month-next" class="icon-btn" aria-label="Mese successivo">&#8250;</button>
-        </div>
-        <button id="header-add-entry" class="btn accent">Nuovo movimento</button>
+        <span id="sync-chip" class="soft-chip">Pronto</span>
+        <button id="generate-from-header" class="btn accent">Calcola piano</button>
       </div>
     </header>
 
@@ -85,123 +81,305 @@
       <section id="screen-dashboard" class="screen active">
         <div class="hero-grid">
           <article class="hero-card balance">
-            <span class="mini-label">Saldo del mese</span>
-            <strong id="metric-balance">EUR 0,00</strong>
-            <p id="metric-balance-note" class="helper">Entrate meno uscite</p>
+            <span class="mini-label">BMI</span>
+            <strong id="metric-bmi">0.0</strong>
+            <p id="metric-bmi-note" class="helper">Classe BMI</p>
           </article>
           <article class="mini-card">
-            <span class="mini-label">Spese</span>
-            <strong id="metric-expense">EUR 0,00</strong>
+            <span class="mini-label">BMR</span>
+            <strong id="metric-bmr">0 kcal</strong>
           </article>
           <article class="mini-card">
-            <span class="mini-label">Entrate</span>
-            <strong id="metric-income">EUR 0,00</strong>
+            <span class="mini-label">TDEE</span>
+            <strong id="metric-tdee">0 kcal</strong>
           </article>
         </div>
 
         <div class="panel-grid dashboard-single">
           <article class="panel">
-            <div class="panel-head">
-              <h3>Categoria top</h3>
-              <span id="top-category-tag" class="soft-chip">Nessuna</span>
+            <div class="panel-head blocky">
+              <div>
+                <h3>BF e target</h3>
+                <p class="helper">Stima, obiettivi opzionali e calorie target.</p>
+              </div>
+              <span id="bf-method-chip" class="soft-chip">In attesa</span>
             </div>
-            <div id="category-bars" class="bars"></div>
+            <div class="macro-grid dashboard-metrics">
+              <div class="metric-card">
+                <span class="mini-label">BF attuale</span>
+                <strong id="metric-bf">0.0%</strong>
+              </div>
+              <div class="metric-card">
+                <span class="mini-label">Peso ideale</span>
+                <strong id="metric-ideal-weight">0.0 kg</strong>
+              </div>
+              <div class="metric-card">
+                <span class="mini-label">Calorie target</span>
+                <strong id="metric-calories">0 kcal</strong>
+              </div>
+              <div class="metric-card">
+                <span class="mini-label">Target BF ideale</span>
+                <strong id="metric-target-bf">0.0%</strong>
+              </div>
+            </div>
+            <p id="plan-summary" class="helper plan-summary">Compila il form per generare il piano.</p>
           </article>
         </div>
       </section>
 
-      <section id="screen-movements" class="screen">
+      <section id="screen-calc" class="screen">
         <div class="panel">
           <div class="panel-head blocky">
             <div>
-              <h3>Movimenti del mese</h3>
-              <p class="helper">Filtra, cerca e modifica ogni movimento.</p>
+              <h3>Calcolatore</h3>
+              <p class="helper">Inserisci i dati base, scegli il fattore attività e il tipo dieta.</p>
             </div>
-            <button id="movements-add-entry" class="btn primary">Aggiungi</button>
+            <span id="activity-chip" class="soft-chip">Attività: moderata (1.550)</span>
           </div>
-          <div class="filter-row">
-            <div class="chips">
-              <button class="chip active" data-filter-type="all">Tutti</button>
-              <button class="chip" data-filter-type="expense">Spese</button>
-              <button class="chip" data-filter-type="income">Entrate</button>
-              <button class="chip" data-filter-type="uncategorized">Da catalogare</button>
-            </div>
-            <input id="search-input" type="search" placeholder="Cerca titolo o note">
-          </div>
-          <div id="movement-list" class="stack-list"></div>
-        </div>
-      </section>
 
-      <section id="screen-categories" class="screen">
-        <div class="panel">
-          <div class="panel-head blocky">
-            <div>
-              <h3>Le tue categorie</h3>
-              <p class="helper">Crea, modifica o archivia le categorie senza perdere lo storico.</p>
-            </div>
-            <button id="add-category" class="btn primary">Nuova categoria</button>
+          <div class="field-grid">
+            <label>
+              <span>Sesso</span>
+              <select id="sex-select">
+                <option value="male">Maschio</option>
+                <option value="female">Femmina</option>
+              </select>
+            </label>
+            <label>
+              <span>Età</span>
+              <input id="age-input" type="number" min="14" max="99" step="1" placeholder="30">
+            </label>
           </div>
-          <div class="quick-category-card">
+
+          <div class="field-grid">
+            <label>
+              <span>Altezza (cm)</span>
+              <input id="height-input" type="number" min="120" max="230" step="0.1" placeholder="175">
+            </label>
+            <label>
+              <span>Peso attuale (kg)</span>
+              <input id="weight-input" type="number" min="30" max="400" step="0.1" placeholder="74">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>Fattore attivita</span>
+              <select id="activity-select"></select>
+            </label>
+            <div class="hint-card">
+              Scegli il valore che vuoi usare: il fattore numerico è già visibile nel menu e nel chip sopra.
+            </div>
+          </div>
+
+          <div class="panel inset-panel">
             <div class="panel-head blocky compact">
               <div>
-                <h3>Aggiungi categoria</h3>
-                <p class="helper">Inserimento rapido senza passare dal modal.</p>
+                <h3>Metodo BF</h3>
+                <p class="helper">Scegli tra manuale, Navy o stima automatica.</p>
               </div>
             </div>
             <div class="field-grid">
               <label>
-                <span>Nome</span>
-                <input id="category-quick-name" type="text" placeholder="Es. Bollette">
+                <span>Metodo</span>
+                <select id="bf-method-select">
+                  <option value="auto">Automatico</option>
+                  <option value="navy">Navy</option>
+                  <option value="manual">Manuale</option>
+                </select>
               </label>
-              <label>
-                <span>Colore</span>
-                <input id="category-quick-color" type="color" value="#1f7a6f">
-              </label>
+              <div id="bf-manual-block">
+                <label>
+                  <span>BF manuale %</span>
+                  <input id="body-fat-manual-input" type="number" min="3" max="80" step="0.1" placeholder="18.0">
+                </label>
+              </div>
             </div>
-            <div class="profile-actions">
-              <button id="save-quick-category" class="btn primary">Aggiungi categoria</button>
+            <div id="bf-navy-block">
+              <div class="field-grid">
+                <label>
+                  <span>Vita / addome (cm)</span>
+                  <input id="waist-input" type="number" min="10" max="250" step="0.1" placeholder="82">
+                </label>
+                <label>
+                  <span>Collo (cm)</span>
+                  <input id="neck-input" type="number" min="10" max="80" step="0.1" placeholder="37">
+                </label>
+              </div>
+              <div class="field-grid">
+                <label>
+                  <span>Fianchi (cm)</span>
+                  <input id="hips-input" type="number" min="10" max="220" step="0.1" placeholder="98">
+                </label>
+                <div class="hint-card" id="bf-hint">
+                  Se scegli Navy, la stima usa vita, collo e fianchi quando serve.
+                </div>
+              </div>
             </div>
           </div>
-          <div id="category-grid" class="category-grid"></div>
+
+          <div class="field-grid">
+            <label>
+              <span>Tipo dieta</span>
+              <select id="diet-goal-select"></select>
+            </label>
+            <label>
+              <span>Peso ideale (opzionale)</span>
+              <input id="ideal-weight-input" type="number" min="30" max="400" step="0.1" placeholder="78">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>Target BF ideale % (opzionale)</span>
+              <input id="target-bf-input" type="number" min="3" max="60" step="0.1" placeholder="12">
+            </label>
+            <label>
+              <span>Preset macro</span>
+              <select id="macro-preset-select"></select>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>Proteine g/kg</span>
+              <input id="protein-input" type="number" min="0.8" max="3.5" step="0.1" placeholder="1.8">
+            </label>
+            <label>
+              <span>Grassi g/kg</span>
+              <input id="fat-input" type="number" min="0.3" max="2.0" step="0.1" placeholder="0.8">
+            </label>
+          </div>
+
+          <label>
+            <span>Nota obiettivo</span>
+            <textarea id="goal-note-input" rows="3" placeholder="Per esempio: voglio arrivare al 12% mantenendo forza e massa magra."></textarea>
+          </label>
+
+          <div class="profile-actions">
+            <button id="calc-save-btn" class="btn primary wide">Genera e salva piano</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-diet" class="screen">
+        <div class="panel">
+          <div class="panel-head blocky">
+            <div>
+              <h3>Piano dieta</h3>
+              <p class="helper">Calorie, macro e tipo dieta.</p>
+            </div>
+            <span id="diet-status-chip" class="soft-chip">In attesa</span>
+          </div>
+
+          <div class="macro-grid diet-grid">
+            <article class="metric-card">
+              <span class="mini-label">Proteine</span>
+              <strong id="diet-protein">0 g</strong>
+              <p id="diet-protein-note" class="helper">0 kcal</p>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">Grassi</span>
+              <strong id="diet-fat">0 g</strong>
+              <p id="diet-fat-note" class="helper">0 kcal</p>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">Carboidrati</span>
+              <strong id="diet-carbs">0 g</strong>
+              <p id="diet-carbs-note" class="helper">0 kcal</p>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">Dieta</span>
+              <strong id="diet-goal">Mantenimento</strong>
+              <p id="diet-goal-note" class="helper">0% del TDEE</p>
+            </article>
+          </div>
+
+          <div id="warning-list" class="warning-list"></div>
         </div>
       </section>
 
       <section id="screen-profile" class="screen">
         <div class="panel profile-panel">
-          <div class="panel inset-panel bank-panel">
+          <div class="profile-hero">
+            <div class="profile-avatar" id="profile-avatar">FGM</div>
+            <div>
+              <p class="eyebrow">Profilo</p>
+              <h2 id="profile-name">Benvenuto</h2>
+              <p id="profile-email" class="helper">Nessun account caricato</p>
+            </div>
+          </div>
+
+          <div class="macro-grid profile-summary-grid">
+            <article class="metric-card">
+              <span class="mini-label">Peso</span>
+              <strong id="profile-weight">-</strong>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">BF</span>
+              <strong id="profile-bf">-</strong>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">Obiettivo</span>
+              <strong id="profile-target">-</strong>
+            </article>
+            <article class="metric-card">
+              <span class="mini-label">Attività</span>
+              <strong id="profile-activity">-</strong>
+            </article>
+          </div>
+
+          <div class="panel inset-panel">
             <div class="panel-head blocky compact">
               <div>
-                <h3>Postepay Evolution</h3>
-                <p id="bank-status-text" class="helper">Saldo live e movimenti importati in automatico.</p>
-              </div>
-              <span id="bank-sync-chip" class="soft-chip">Non collegata</span>
-            </div>
-
-            <div class="profile-stats bank-stats">
-              <div class="profile-stat">
-                <span class="mini-label">Saldo attuale</span>
-                <strong id="bank-balance">EUR 0,00</strong>
-              </div>
-              <div class="profile-stat">
-                <span class="mini-label">Conto collegato</span>
-                <strong id="bank-account-name">Nessun collegamento</strong>
+                <h3>Check-in rapido</h3>
+                <p class="helper">Salva peso e BF attuali per tenere traccia del percorso.</p>
               </div>
             </div>
-
-            <div class="bank-meta">
-              <div id="bank-iban" class="meta-pill">IBAN o PAN non disponibile</div>
-              <div id="bank-valid-until" class="meta-pill">Accesso non attivo</div>
+            <div class="field-grid">
+              <label>
+                <span>Data</span>
+                <input id="checkin-date-input" type="date">
+              </label>
+              <label>
+                <span>Peso (kg)</span>
+                <input id="checkin-weight-input" type="number" min="30" max="400" step="0.1" placeholder="74">
+              </label>
             </div>
-
-            <p id="bank-message" class="helper"></p>
-
+            <div class="field-grid">
+              <label>
+                <span>BF %</span>
+                <input id="checkin-bf-input" type="number" min="3" max="80" step="0.1" placeholder="17.5">
+              </label>
+              <label>
+                <span>Nota</span>
+                <input id="checkin-note-input" type="text" placeholder="Energia alta, allenamento buono...">
+              </label>
+            </div>
             <div class="profile-actions">
-              <button id="bank-connect" class="btn primary">Collega Postepay</button>
-              <button id="bank-sync" class="btn secondary">Aggiorna saldo</button>
-              <button id="bank-disconnect" class="btn danger">Scollega</button>
+              <button id="save-checkin-btn" class="btn secondary">Salva check-in</button>
+              <button id="export-csv-btn" class="btn accent">Scarica CSV</button>
             </div>
+          </div>
 
-            <div id="bank-transaction-list" class="stack-list"></div>
+          <div class="panel inset-panel">
+            <div class="panel-head blocky compact">
+              <div>
+                <h3>Storico piani</h3>
+                <p class="helper">Gli ultimi piani salvati restano nel tuo account.</p>
+              </div>
+            </div>
+            <div id="plan-history-list" class="stack-list"></div>
+          </div>
+
+          <div class="panel inset-panel">
+            <div class="panel-head blocky compact">
+              <div>
+                <h3>Check-in recenti</h3>
+                <p class="helper">Peso e BF registrati nel tempo.</p>
+              </div>
+            </div>
+            <div id="checkin-list" class="stack-list"></div>
           </div>
 
           <div class="profile-actions">
@@ -211,96 +389,19 @@
       </section>
     </main>
 
-    <button id="fab-entry" class="fab" aria-label="Nuovo movimento">+</button>
+    <button id="fab-calc" class="fab" aria-label="Genera piano">+</button>
 
     <nav class="bottom-nav">
       <button class="nav-btn active" data-screen="screen-dashboard">Dashboard</button>
-      <button class="nav-btn" data-screen="screen-movements">Movimenti</button>
-      <button class="nav-btn" data-screen="screen-categories">Categorie</button>
+      <button class="nav-btn" data-screen="screen-calc">Calcolo</button>
+      <button class="nav-btn" data-screen="screen-diet">Dieta</button>
       <button class="nav-btn" data-screen="screen-profile">Profilo</button>
     </nav>
   </div>
 
-  <div id="entry-modal" class="modal hidden">
-    <div class="modal-card">
-      <div class="panel-head blocky">
-        <div>
-          <p class="eyebrow">Movimento</p>
-          <h3 id="entry-modal-title">Nuovo movimento</h3>
-        </div>
-        <button id="close-entry-modal" class="icon-close" aria-label="Chiudi">x</button>
-      </div>
-      <div class="field-grid">
-        <label>
-          <span>Tipo</span>
-          <select id="entry-type">
-            <option value="expense">Spesa</option>
-            <option value="income">Entrata</option>
-          </select>
-        </label>
-        <label>
-          <span>Data</span>
-          <input id="entry-date" type="date">
-        </label>
-      </div>
-      <div class="field-grid">
-        <label>
-          <span>Titolo</span>
-          <input id="entry-title" type="text" placeholder="Es. Spesa settimanale">
-        </label>
-        <label>
-          <span>Importo</span>
-          <input id="entry-amount" type="number" step="0.01" min="0.01" placeholder="0.00">
-        </label>
-      </div>
-      <label>
-        <span>Categoria</span>
-        <select id="entry-category"></select>
-      </label>
-      <label>
-        <span>Note</span>
-        <textarea id="entry-notes" rows="4" placeholder="Dettagli utili o promemoria"></textarea>
-      </label>
-      <div class="modal-actions">
-        <button id="save-entry" class="btn primary">Salva</button>
-        <button id="delete-entry" class="btn danger hidden">Elimina</button>
-      </div>
-    </div>
-  </div>
+  <div id="toast" class="toast hidden"></div>
 
-  <div id="category-modal" class="modal hidden">
-    <div class="modal-card">
-      <div class="panel-head blocky">
-        <div>
-          <p class="eyebrow">Categoria</p>
-          <h3 id="category-modal-title">Nuova categoria</h3>
-        </div>
-        <button id="close-category-modal" class="icon-close" aria-label="Chiudi">x</button>
-      </div>
-      <div class="field-grid">
-        <label>
-          <span>Nome</span>
-          <input id="category-name" type="text" placeholder="Es. Bollette">
-        </label>
-        <label>
-          <span>Colore</span>
-          <input id="category-color" type="color" value="#1f7a6f">
-        </label>
-      </div>
-      <label class="toggle-line">
-        <input id="category-archived" type="checkbox">
-        <span>Categoria archiviata</span>
-      </label>
-      <div class="modal-actions">
-        <button id="save-category" class="btn primary">Salva</button>
-        <button id="delete-category" class="btn danger hidden">Archivia o elimina</button>
-      </div>
-    </div>
-  </div>
-
-  {% if google_client_id %}
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  {% endif %}
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>
