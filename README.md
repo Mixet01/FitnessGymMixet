@@ -6,8 +6,8 @@ PWA mobile per calcolare:
 - `BMR`
 - `TDEE`
 - `BF` con metodo `Navy` opzionale
-- piano dieta con macro variabili e obiettivi opzionali
-- storico piani e check-in peso/BF
+- piano dieta con macro dinamiche in base al tipo dieta
+- dashboard unica con peso, BF, kcal e macro
 
 L'app mantiene:
 
@@ -54,7 +54,7 @@ L'app mantiene:
 3. Avvia il server:
 
    ```powershell
-   python spese_mixet.py
+   python FitnessGymMixet.py
    ```
 
 4. Apri l'app:
@@ -95,9 +95,7 @@ Nella schermata calcolo inserisci:
 - tipo dieta
 - peso ideale opzionale
 - target BF opzionale
-- macro preset
-- proteine g/kg
-- grassi g/kg
+- nota obiettivo opzionale
 
 ## Login Google
 
@@ -125,5 +123,5 @@ $env:PWA_ICON_FILE="mia-icona.png"
 ## Note
 
 - il layout e pensato per mobile
-- il profilo salva storico piani e check-in
-- il bottone `Scarica CSV` esporta lo storico dei piani
+- la dashboard mostra il riepilogo peso, BF, calorie e macro
+- le macro seguono automaticamente il tipo dieta selezionato

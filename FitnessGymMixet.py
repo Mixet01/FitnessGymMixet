@@ -51,7 +51,7 @@ ICON_TEXT = os.environ.get("PWA_ICON_TEXT", "FGM").strip() or "FGM"
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 APP_PORT = int(os.environ.get("PWA_PORT", "8010"))
 SESSION_DAYS = env_int("SPESE_MIXET_SESSION_DAYS", 90)
-ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-28-fit-2").strip() or "2026-05-28-fit-2"
+ASSET_VERSION = os.environ.get("SPESE_MIXET_ASSET_VERSION", "2026-05-28-fit-3").strip() or "2026-05-28-fit-3"
 STATE_CACHE_TTL = max(0, env_int("SPESE_MIXET_STATE_CACHE_TTL", 45))
 ENABLE_BANKING_BASE_URL = os.environ.get("ENABLE_BANKING_BASE_URL", "https://api.enablebanking.com").strip().rstrip("/")
 ENABLE_BANKING_APP_ID = os.environ.get("ENABLE_BANKING_APP_ID", "").strip()
@@ -88,18 +88,11 @@ FITNESS_ACTIVITY_LEVELS = [
 ]
 
 FITNESS_DIET_GOALS = [
-    {"key": "maintenance", "label": "Mantenimento", "adjustment_percent": 0, "direction": "mantenimento", "description": "Calorie vicino al TDEE."},
-    {"key": "cut", "label": "Cut", "adjustment_percent": -15, "direction": "deficit", "description": "Deficit moderato per definizione."},
-    {"key": "aggressive_cut", "label": "Cut aggressivo", "adjustment_percent": -25, "direction": "deficit", "description": "Deficit più spinto per accelerare il taglio."},
-    {"key": "bulk", "label": "Bulk", "adjustment_percent": 10, "direction": "surplus", "description": "Surplus moderato per aumentare massa."},
-    {"key": "aggressive_bulk", "label": "Bulk aggressivo", "adjustment_percent": 20, "direction": "surplus", "description": "Surplus più alto per spinta massima."},
-]
-
-FITNESS_MACRO_PRESETS = [
-    {"key": "balanced", "label": "Bilanciata", "protein_g_per_kg": 1.8, "fat_g_per_kg": 0.8},
-    {"key": "cut", "label": "Cut", "protein_g_per_kg": 2.2, "fat_g_per_kg": 0.7},
-    {"key": "performance", "label": "Performance", "protein_g_per_kg": 1.7, "fat_g_per_kg": 0.9},
-    {"key": "custom", "label": "Custom", "protein_g_per_kg": 1.8, "fat_g_per_kg": 0.8},
+    {"key": "maintenance", "label": "Mantenimento", "adjustment_percent": 0, "direction": "mantenimento", "protein_g_per_kg": 1.8, "fat_g_per_kg": 0.8, "description": "Calorie vicino al TDEE."},
+    {"key": "cut", "label": "Cut", "adjustment_percent": -15, "direction": "deficit", "protein_g_per_kg": 2.2, "fat_g_per_kg": 0.7, "description": "Deficit moderato per definizione."},
+    {"key": "aggressive_cut", "label": "Cut aggressivo", "adjustment_percent": -25, "direction": "deficit", "protein_g_per_kg": 2.4, "fat_g_per_kg": 0.6, "description": "Deficit più spinto per accelerare il taglio."},
+    {"key": "bulk", "label": "Bulk", "adjustment_percent": 10, "direction": "surplus", "protein_g_per_kg": 1.8, "fat_g_per_kg": 0.9, "description": "Surplus moderato per aumentare massa."},
+    {"key": "aggressive_bulk", "label": "Bulk aggressivo", "adjustment_percent": 20, "direction": "surplus", "protein_g_per_kg": 1.7, "fat_g_per_kg": 1.0, "description": "Surplus più alto per spinta massima."},
 ]
 
 MONEY_STEP = Decimal("0.01")
@@ -445,14 +438,6 @@ def fitness_activity_level(key):
     return FITNESS_ACTIVITY_LEVELS[2]
 
 
-def fitness_macro_preset(key):
-    key = str(key or "").strip().lower()
-    for item in FITNESS_MACRO_PRESETS:
-        if item["key"] == key:
-            return item
-    return FITNESS_MACRO_PRESETS[0]
-
-
 def fitness_diet_goal(key):
     key = str(key or "").strip().lower()
     for item in FITNESS_DIET_GOALS:
@@ -590,10 +575,6 @@ def fitness_calculate_plan(payload):
     activity_item = fitness_activity_level(payload.get("activity_key"))
     activity_factor = activity_item["factor"]
 
-    preset = fitness_macro_preset(payload.get("macro_preset"))
-    protein_g_per_kg = clamp(to_float(payload.get("protein_g_per_kg"), preset["protein_g_per_kg"]) or preset["protein_g_per_kg"], 0.8, 3.5)
-    fat_g_per_kg = clamp(to_float(payload.get("fat_g_per_kg"), preset["fat_g_per_kg"]) or preset["fat_g_per_kg"], 0.3, 2.0)
-
     bf_info = fitness_body_fat_estimate(
         {
             "sex": sex,
@@ -626,6 +607,8 @@ def fitness_calculate_plan(payload):
     weekly_change_kg = daily_delta * 7.0 / 7700.0
     weekly_change_pct = abs(weekly_change_kg) / weight_kg * 100.0
 
+    protein_g_per_kg = clamp(diet_goal.get("protein_g_per_kg", 1.8), 0.8, 3.5)
+    fat_g_per_kg = clamp(diet_goal.get("fat_g_per_kg", 0.8), 0.3, 2.0)
     protein_g = protein_g_per_kg * (lean_mass_kg if direction == "deficit" else weight_kg)
     fat_g = fat_g_per_kg * weight_kg
     protein_kcal = protein_g * 4.0
@@ -674,14 +657,12 @@ def fitness_calculate_plan(payload):
             "hips_cm": round1(to_float(payload.get("hips_cm"), 0.0) or 0.0) if to_float(payload.get("hips_cm"), None) is not None else None,
             "ideal_weight_kg": round1(ideal_weight_kg) if ideal_weight_kg is not None else None,
             "target_body_fat_percent": round1(target_bf) if target_bf is not None else None,
-            "macro_preset": preset["key"],
-            "protein_g_per_kg": round(protein_g_per_kg, 2),
-            "fat_g_per_kg": round(fat_g_per_kg, 2),
             "goal_note": clean_text(payload.get("goal_note"), "", 180),
         },
         "metrics": {
             "bmi": round1(bmi_value),
             "bmi_category": bmi_category(bmi_value),
+            "current_weight_kg": round1(weight_kg),
             "bmr": round0(bmr_value),
             "tdee": round0(tdee_value),
             "body_fat_percent": round1(body_fat_percent),
@@ -704,7 +685,6 @@ def fitness_calculate_plan(payload):
             "direction": direction,
         },
         "macros": {
-            "preset": preset,
             "protein_g": round1(protein_g),
             "protein_kcal": round0(protein_kcal),
             "fat_g": round1(fat_g),
@@ -3267,7 +3247,6 @@ def fitness_get_state(email):
         "checkins": fitness_list_checkins(email, limit=10),
         "activity_levels": FITNESS_ACTIVITY_LEVELS,
         "diet_goals": FITNESS_DIET_GOALS,
-        "macro_presets": FITNESS_MACRO_PRESETS,
     }
 
 
@@ -3495,9 +3474,6 @@ def api_plan_calc():
         "hips_cm": plan["inputs"]["hips_cm"],
         "ideal_weight_kg": plan["inputs"]["ideal_weight_kg"],
         "target_body_fat_percent": plan["inputs"]["target_body_fat_percent"],
-        "macro_preset": plan["inputs"]["macro_preset"],
-        "protein_g_per_kg": plan["inputs"]["protein_g_per_kg"],
-        "fat_g_per_kg": plan["inputs"]["fat_g_per_kg"],
         "goal_note": plan["inputs"]["goal_note"],
         "updated_at": iso_now(),
     }
