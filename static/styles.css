@@ -231,7 +231,7 @@ button {
 .app-shell {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 18px 18px 120px;
+  padding: 18px 18px 28px;
 }
 
 .topbar {
@@ -269,7 +269,7 @@ button {
 .app-frame {
   display: grid;
   gap: 16px;
-  padding-bottom: 72px;
+  padding-bottom: 0;
 }
 
 .screen {
@@ -291,7 +291,7 @@ button {
 }
 
 .hero-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .hero-card {
@@ -299,7 +299,7 @@ button {
 }
 
 .hero-card.balance {
-  grid-column: 1 / -1;
+  grid-column: span 2;
   min-height: 166px;
   background:
     radial-gradient(circle at 88% 0%, rgba(39, 232, 157, 0.2), transparent 32%),
@@ -650,7 +650,7 @@ textarea::placeholder {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 108px;
+  bottom: 24px;
   transform: translateX(-50%);
   min-width: min(560px, calc(100vw - 28px));
   padding: 14px 18px;
@@ -749,6 +749,10 @@ textarea::placeholder {
   .top-controls .btn {
     width: 100%;
   }
+
+  .hero-card.balance {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 640px) {
@@ -792,7 +796,7 @@ textarea::placeholder {
 
   .toast {
     min-width: calc(100vw - 24px);
-    bottom: 102px;
+    bottom: 24px;
     border-radius: 20px;
   }
 }
