@@ -1,4 +1,20 @@
 ﻿(function () {
+  const fallbackActivityLevels = [
+    { key: "sedentary", label: "Sedentario", factor: 1.2, description: "Poco movimento e allenamenti rari." },
+    { key: "light", label: "Leggero", factor: 1.375, description: "Allenamento 1-3 volte a settimana." },
+    { key: "moderate", label: "Moderato", factor: 1.55, description: "Allenamento 3-5 volte a settimana." },
+    { key: "active", label: "Attivo", factor: 1.725, description: "Allenamento quasi ogni giorno." },
+    { key: "very_active", label: "Molto attivo", factor: 1.9, description: "Lavoro fisico o doppie sessioni." },
+  ];
+
+  const fallbackDietGoals = [
+    { key: "maintenance", label: "Mantenimento", adjustment_percent: 0, direction: "mantenimento", protein_g_per_kg: 1.8, fat_g_per_kg: 0.8 },
+    { key: "cut", label: "Cut", adjustment_percent: -15, direction: "deficit", protein_g_per_kg: 2.2, fat_g_per_kg: 0.7 },
+    { key: "aggressive_cut", label: "Cut aggressivo", adjustment_percent: -25, direction: "deficit", protein_g_per_kg: 2.4, fat_g_per_kg: 0.6 },
+    { key: "bulk", label: "Bulk", adjustment_percent: 10, direction: "surplus", protein_g_per_kg: 1.8, fat_g_per_kg: 0.9 },
+    { key: "aggressive_bulk", label: "Bulk aggressivo", adjustment_percent: 20, direction: "surplus", protein_g_per_kg: 1.7, fat_g_per_kg: 1.0 },
+  ];
+
   const state = {
     me: null,
     activityLevels: [],
@@ -51,6 +67,7 @@
     metricBmr: document.getElementById("metric-bmr"),
     metricTdee: document.getElementById("metric-tdee"),
     metricBf: document.getElementById("metric-bf"),
+    metricBfDetail: document.getElementById("metric-bf-detail"),
     metricIdealWeight: document.getElementById("metric-ideal-weight"),
     metricCalories: document.getElementById("metric-calories"),
     metricTargetBf: document.getElementById("metric-target-bf"),
@@ -118,6 +135,37 @@
   function formatWeight(value) { return `${formatNumber(value, 1)} kg`; }
   function formatPercent(value) { return `${formatNumber(value, 1)}%`; }
   function formatCalories(value) { return `${formatNumber(value, 0)} kcal`; }
+
+  function formatAdjustmentPercent(value) {
+    const num = Number(value || 0);
+    if (num === 0) return "0% del TDEE";
+    return `${num > 0 ? "+" : ""}${formatNumber(num, 0)}% del TDEE`;
+  }
+
+  function getActivityLevels() {
+    return state.activityLevels.length ? state.activityLevels : fallbackActivityLevels;
+  }
+
+  function getDietGoals() {
+    return state.dietGoals.length ? state.dietGoals : fallbackDietGoals;
+  }
+
+  function getActivityItem(key) {
+    const levels = getActivityLevels();
+    return levels.find((item) => item.key === key) || levels.find((item) => item.key === "moderate") || fallbackActivityLevels[2];
+  }
+
+  function getDietGoalItem(key) {
+    const goals = getDietGoals();
+    return goals.find((item) => item.key === key) || goals[0] || fallbackDietGoals[0];
+  }
+
+  function getBfMethodLabel(value) {
+    const mode = String(value || "auto").trim().toLowerCase();
+    if (mode === "manual") return "BF manuale";
+    if (mode === "navy") return "Metodo Navy";
+    return "Automatico";
+  }
 
   function formatDate(value) {
     if (!value) return "-";
@@ -339,10 +387,6 @@
   }
 
   function computeLocalPlan(input) {
-    return { ready: false, warnings: [] };
-  }
-
-  function computeLocalPlan(input) {
     const sex = String(input.sex || "").trim().toLowerCase();
     const ageRaw = parseNum(input.age_years);
     const heightRaw = parseNum(input.height_cm);
@@ -516,6 +560,7 @@
       els.metricBmr.textContent = "0 kcal";
       els.metricTdee.textContent = "0 kcal";
       els.metricBf.textContent = "0.0%";
+      els.metricBfDetail.textContent = "0.0%";
       els.metricIdealWeight.textContent = "-";
       els.metricCalories.textContent = "0 kcal";
       els.metricTargetBf.textContent = "-";
@@ -532,6 +577,7 @@
     els.metricBmr.textContent = formatCalories(metrics.bmr);
     els.metricTdee.textContent = formatCalories(metrics.tdee);
     els.metricBf.textContent = formatPercent(metrics.body_fat_percent);
+    els.metricBfDetail.textContent = formatPercent(metrics.body_fat_percent);
     const idealWeight = metrics.ideal_weight_kg != null ? metrics.ideal_weight_kg : metrics.target_weight_from_bf_kg;
     els.metricIdealWeight.textContent = idealWeight != null ? formatWeight(idealWeight) : "-";
     els.metricCalories.textContent = formatCalories(metrics.calorie_target);
@@ -587,7 +633,7 @@
   }
 
   function renderAll() {
-    const plan = state.latestPlan || state.preview;
+    const plan = state.preview || state.latestPlan;
     renderMetrics(plan);
     renderDiet(plan);
     updateActivityChip();
